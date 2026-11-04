@@ -1,0 +1,51 @@
+# ==================================================
+# Proyecto 4 - EL3313 Taller de Diseño Digital
+# Archivos generados por Vivado y Vitis
+# ==================================================
+
+# Vivado - archivos temporales
+.Xil/
+*.jou
+*.log
+*.str
+*.backup.jou
+*.backup.log
+
+# Vivado - directorios generados
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+*.gen/
+
+# Vivado - archivos de simulacion
+xsim.dir/
+*.wdb
+*.wcfg
+
+# Vitis - archivos de compilacion
+Debug/
+Release/
+_build/
+build/
+*.elf
+*.o
+*.obj
+*.d
+*.map
+
+# Archivos temporales del sistema
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Editores
+.vscode/
+.idea/
