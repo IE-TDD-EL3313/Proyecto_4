@@ -2,59 +2,44 @@
 
 **Proyecto:** EL3313, Proyecto 4, II semestre de 2026
 
-**Responsable:** Luis Diego Álvarez
-
-**Seguimiento:** [Issue #3](https://github.com/IE-TDD-EL3313/Proyecto_4/issues/3)
-
-**Rama de trabajo:** docs/adc-firmware-design, creada desde develop
-
 **Estado:** propuesta de diseño para revisión; implementación y ensayos pendientes
 
-**Fecha:** 4 de noviembre de 2026
+## 1. Contexto del subsistema
 
-**Base revisada:** `origin/develop` en `32c4a65`; [plantilla integrada](planteamiento.md).
+El subsistema adquiere la corriente de carga, ejecuta periódicamente el regulador PR discreto en MicroBlaze V y actualiza la referencia del PWM. Incluye interfaces, temporización, calibración, almacenamiento de muestras, botones y exportación UART. PEDP proporciona la ecuación del controlador, sus coeficientes y los parámetros de la etapa de potencia.
 
-## 1. Alcance y organización
-
-Esta sección especifica cómo se adquiere la corriente, se ejecuta el PR discreto en MicroBlaze V y se actualiza el periférico PWM. Incluye interfaces, temporización, registro de muestras, botones y exportación UART. La plataforma MicroBlaze V corresponde a Marvin; el PWM y su interfaz AXI4-Lite corresponden a Keylor. PEDP entrega la ecuación del PR, sus coeficientes, parámetros de potencia y calibración del sensor.
-
-Archivos que forman esta sección:
-
-- Este documento: arquitectura, interfaces y decisiones.
-- [Diagramas técnicos](figuras/03_diagramas_adc_firmware.md): niveles 1–4 y flujos de software.
-- [Plan de verificación y trazabilidad](03_verificacion_adc_firmware.md): pruebas, criterios y evidencia.
-- [Documento editable en Lucid](https://lucid.app/lucidchart/7cf6dd6b-5941-4a32-8457-00e8aec6a009/edit): diez páginas de diseño conceptual.
-
-El repositorio declara Vivado 2026.1. El enunciado menciona 2025.1. El equipo debe registrar una sola combinación Vivado/Vitis y su BSP; esta sección se adapta a la versión que se confirme, sin asumir compatibilidad binaria entre exportaciones XSA.
-
-Se recuperaron estos documentos del archivo `Proyecto4_LuisDiego_diseno.zip` y se contrastaron con el Issue #3, el enunciado local y las diez páginas de Lucid. El PDF genérico de reparto asigna XADC al rol de plataforma; aquí prevalecen la asignación explícita y el Issue #3: Luis Diego diseña adquisición, firmware y temporización; Marvin integra la plataforma. No hay RTL ni firmware implementados en la base revisada: las interfaces siguientes son contratos propuestos.
+El repositorio declara Vivado 2026.1 y el enunciado indica Vivado/Vitis 2025.1. Se debe utilizar una combinación acordada de herramientas, IP y BSP, sin asumir compatibilidad binaria entre exportaciones XSA.
 
 ## 2. Requisitos y decisiones base
 
 | Elemento | Definición | Estado |
 |---|---|---|
 | Procesador | MicroBlaze V a 100 MHz, caché de instrucciones de 8 KB y memoria local de 32 KB | Mínimos del enunciado §4.2.1 |
-| Reloj AXI/PWM/ADC | Dominio común de 100 MHz y DCLK continuo | Propuesta de integración; confirmar con Marvin |
+| Reloj AXI/PWM/ADC | Dominio común de 100 MHz y DCLK continuo | Propuesta de integración; por confirmar en la plataforma |
 | Señal medida | Corriente alterna de la carga, representada con offset analógico | Contrato con PEDP |
 | Referencia | 50 Hz; 0,2 / 0,5 / 1,0 A pico | Requisito |
 | Adquisición | XADC Wizard mediante DRP, wrapper AXI4-Lite propio, un canal unipolar con offset, modo por evento | Propuesta |
 | Muestreo y control | Una muestra y una ISR por período PWM | Propuesta base |
 | Caso de dimensionamiento | fs = fPWM = 20 kHz; Ts = 50 µs | Por validar con PEDP y WCET |
 | Control en C | float32 para calibración, referencia y PR | Decisión inicial sujeta a WCET |
-| Referencia del PWM | Q1.15 con signo; saturación previa | Por acordar con Keylor |
+| Referencia del PWM | Q1.15 con signo; saturación previa | Pendiente de definir en la especificación del PWM |
 | Histórico | Dos bancos circulares de 2048 registros de 4 bytes | Propuesta |
 | UART | 115200 baudios, 8N1, trama binaria y CRC32 | Propuesta |
 | Error de adquisición/tiempo | Deshabilitar PWM; PR congelado; rearme explícito | Política propuesta |
 
-Los valores propuestos permiten evaluar recursos y contratos; no constituyen mediciones ni parámetros aprobados por Potencia. La selección final del canal, pinout y rango eléctrico requiere conocer la tarjeta y el sensor. No se asignan pines a partir de una tarjeta usada en otro proyecto.
+Los valores propuestos permiten evaluar recursos y contratos; no constituyen mediciones ni parámetros aprobados por Potencia. La selección final del canal, pinout y rango eléctrico requiere conocer la tarjeta y el sensor. El pinout se determina a partir del esquema de la tarjeta seleccionada.
 
 ## 3. Arquitectura de adquisición
+
+![Arquitectura interna del periférico ADC/XADC.](figuras/03_modulos_adc_xadc.png)
+
+*Arquitectura interna del periférico ADC/XADC.*
 
 ### 3.1. Recorrido de la muestra
 
 La corriente pasa por el sensor y su acondicionamiento antes de ingresar al canal analógico seleccionado del XADC. El PWM genera **pwm_trigger_o** en el instante acordado. La interfaz acepta la solicitud, solicita conversión, lee el resultado por DRP y publica una tupla formada por dato, secuencia y tiempo del disparo.
 
-El periférico contiene interfaz AXI4-Lite, registros, árbitro de solicitudes, FSM, contador de espera, captura y XADC Wizard. El firmware accede mediante registros MMIO de 32 bits; la dirección base se obtiene de la plataforma exportada por Marvin.
+El periférico contiene interfaz AXI4-Lite, registros, árbitro de solicitudes, FSM, contador de espera, captura y XADC Wizard. El firmware accede mediante registros MMIO de 32 bits; la dirección base se obtiene de la plataforma exportada desde Vivado.
 
 El XADC trabaja en modo por evento: CONVST determina el inicio de la muestra; EOC señala resultado convertido; la lectura DRP concluye al recibir DRDY. Se mantiene DCLK continuo y se respeta el intervalo de adquisición entre conversiones [R1, R2]. El diseño base no activa promediado multiconversión, para conservar una relación directa entre disparo y muestra.
 
@@ -80,13 +65,20 @@ Se supone un dominio síncrono para AXI, PWM e interfaz, con DCLK compatible. Si
 
 ### 3.3. Estados y manejo de solicitudes
 
+![FSM de adquisición y lectura DRP.](figuras/04_fsm_adquisicion_adc_xadc.png)
+
+*FSM de adquisición y lectura DRP.*
+
+La recuperación desde ERROR exige reset coordinado. El ancho CONVST se parametriza en N_convst ciclos; un ciclo requiere validación con el dispositivo.
+
+
 La FSM recorre REPOSO → DISPARAR → ESPERAR_EOC → SOLICITAR_DRP → ESPERAR_DRDY → PUBLICAR. Cada espera tiene timeout configurable por parámetro de síntesis. El ancho alto/bajo de CONVST se selecciona conforme al dispositivo y al XADC Wizard; la etapa DISPARAR dura N_convst ciclos y no supone sin verificación que un pulso de 10 ns sea suficiente. Ante vencimiento se activa TIMEOUT y no se incrementa SEQ. Una solicitud con adquisición ocupada o sin disponibilidad del XADC se descarta y activa OVERRUN.
 
 START_SW se utiliza en diagnóstico, con SYNC_MODE=0. Durante el control, SYNC_MODE=1 selecciona exclusivamente el trigger PWM. Una escritura START_SW en modo sincronizado se ignora y registra OVERRUN. ENABLE=0 bloquea nuevas solicitudes; una operación ya aceptada puede terminar. Un reset interrumpe la operación, limpia VALID/errores y devuelve la FSM a REPOSO.
 
 Las solicitudes con ENABLE=0 se ignoran sin error. SYNC_MODE solo se cambia con ENABLE=0 y BUSY=0; cambiarlo con operación activa devuelve SLVERR y conserva CTRL. ENABLE y START_SW pueden escribirse juntos en diagnóstico: la aceptación usa el ENABLE resultante. No hay cola de solicitudes.
 
-Tras timeout, la FSM queda en ERROR bloqueado: no emite CONVST/DEN ni acepta disparos y descarta EOC/DRDY tardíos. Borrar TIMEOUT por W1C no rearma la FSM; BUSY permanece en 1 en ERROR. Se exige reset coordinado del wrapper y XADC, con potencia bloqueada, para volver a WARMUP. Esto evita asociar una respuesta vieja a una solicitud nueva. Marvin debe definir cómo aplicar ese reset; el mapa actual no propone un bit de reset software.
+Tras timeout, la FSM queda en ERROR bloqueado: no emite CONVST/DEN ni acepta disparos y descarta EOC/DRDY tardíos. Borrar TIMEOUT por W1C no rearma la FSM; BUSY permanece en 1 en ERROR. Se exige reset coordinado del wrapper y XADC, con potencia bloqueada, para volver a WARMUP. Esto evita asociar una respuesta vieja a una solicitud nueva. La integración de plataforma debe definir cómo aplicar ese reset; el mapa actual no propone un bit de reset software.
 
 Reset domina todos los estados, cancela la publicación pendiente y limpia CTRL/VALID/errores/DATA/SEQ/TIME/TICKS. La admisión permanece bloqueada hasta terminar la inicialización del XADC y el asentamiento analógico. El tiempo tras reset y el divisor ADCCLK se justifican con la hoja de datos del FPGA seleccionado; BUSY=0 inmediatamente tras reset no basta para admitir una conversión.
 
@@ -107,7 +99,7 @@ El acondicionamiento debe ubicar todo el rango de corriente dentro del rango ana
 | Contador/watchdog: acotar tiempo | clk, reset, inicio/fin | ticks, timestamp, TIMEOUT | TICKS solo reinicia con reset; diferencias modulares | A16–A19, T09 |
 | Captura: publicar indivisiblemente | DO[15:4], tiempo del disparo, capture_en | DATA/SEQ/TIME, VALID | Un incremento por éxito; VALID persiste hasta reset | A06–A11 |
 
-Esta separación permite simular protocolo y conversión por separado. D3–D4 muestran las relaciones; §3.3 define funcionamiento, reset y condiciones de borde sin atribuir implementación a los bloques.
+Esta separación permite simular protocolo y conversión por separado. Las figuras de adquisición y FSM muestran las relaciones; §3.3 define funcionamiento, reset y condiciones de borde sin atribuir implementación a los bloques.
 
 ## 4. Interfaz AXI4-Lite propuesta
 
@@ -147,7 +139,7 @@ La guardia SEQ1/SEQ2 requiere publicación simultánea en hardware y lecturas MM
 
 Se conservan CONTROL_STATUS en offset 0x00 y DUTY_REF en 0x04 según el enunciado. El driver escribe solo campos R/W, conserva frecuencia y habilitación y no interpreta running como campo escribible.
 
-DUTY_REF se escribe como valor pendiente y se aplica en el valle siguiente de la portadora, conforme al contrato con Keylor. No se inventan offsets de tiempo muerto, sincronización u otras funciones: esos registros se acuerdan con el responsable del PWM. Un GPIO de falla software y una protección rápida de hardware deben disponer de una ruta de deshabilitación definida.
+DUTY_REF se escribe como valor pendiente y se aplica en el valle siguiente de la portadora, conforme al contrato de actualización del PWM. Los offsets de tiempo muerto, sincronización y otras funciones se definen en la especificación del PWM. Un GPIO de falla software y una protección rápida de hardware deben disponer de una ruta de deshabilitación definida.
 
 ## 5. Temporización e interrupciones
 
@@ -206,7 +198,11 @@ El control tiene prioridad sobre UART y botones. En el diseño base, main consul
 
 ### 5.3. Sincronización propuesta y presupuesto
 
-La misma frecuencia no establece fase. Como contrato propuesto con Keylor y Marvin se define un arranque en hardware: con el PWM de potencia bloqueado, un circuito armado emite **sync_start_i** al primer generateout0. El PWM carga una posición inicial de su portadora que representa la fase de IRQ acordada. Este puerto y su lógica todavía requieren aceptación e implementación por los responsables; no existen por defecto en AXI Timer ni se suponen presentes en el PWM.
+![Relación temporal entre PWM, adquisición, Timer e ISR.](figuras/09_temporizacion_adc_timer_pwm.png)
+
+*Relación temporal entre PWM, adquisición, Timer e ISR.*
+
+La misma frecuencia no establece fase. Como contrato propuesto entre los subsistemas PWM y plataforma se define un arranque en hardware: con el PWM de potencia bloqueado, un circuito armado emite **sync_start_i** al primer generateout0. El PWM carga una posición inicial de su portadora que representa la fase de IRQ acordada. Este puerto y su lógica todavía requieren aceptación e implementación por los responsables; no existen por defecto en AXI Timer ni se suponen presentes en el PWM.
 
 Caso de diseño a 20 kHz:
 
@@ -227,9 +223,9 @@ $$L_{irq,max}+C_{ISR,total,max}<50\,\mu s$$
 
 Los términos no son tiempos medidos. C_hasta escritura excluye la transferencia final; C_ISR,total incluye registro de muestras, instrumentación y retorno. Si float32 no cumple, se optimiza o se cambia Ts y se recalculan PR, fase y registros antes de energizar. El primer PWM habilitado utiliza referencia segura; RUNNING requiere muestra válida y sincronización verificada.
 
-En ciclos, los presupuestos del ejemplo son 1000 desde trigger hasta IRQ, 1500 desde IRQ hasta latch y 5000 hasta la siguiente IRQ. Los márgenes M_adc/M_act, el timeout de conversión/DRP y la cota máxima de antigüedad se fijan después de conocer ADCCLK y medir la plataforma; no se usa 50 µs como único deadline de escritura. Una comprobación previa a MMIO reserva T_AXI,max y el margen, y una posterior detecta cualquier incumplimiento. Detectar una escritura tardía no deshace un latch: el bloqueo independiente de compuertas y su prioridad sobre DUTY_REF requieren contrato con Keylor. La seguridad no depende de que el software siempre alcance ese límite.
+En ciclos, los presupuestos del ejemplo son 1000 desde trigger hasta IRQ, 1500 desde IRQ hasta latch y 5000 hasta la siguiente IRQ. Los márgenes M_adc/M_act, el timeout de conversión/DRP y la cota máxima de antigüedad se fijan después de conocer ADCCLK y medir la plataforma; no se usa 50 µs como único deadline de escritura. Una comprobación previa a MMIO reserva T_AXI,max y el margen, y una posterior detecta cualquier incumplimiento. Detectar una escritura tardía no deshace un latch: el bloqueo independiente de compuertas y su prioridad sobre DUTY_REF se definen en el contrato de protección del PWM. La seguridad no depende de que el software siempre alcance ese límite.
 
-Un cambio de frecuencia del sistema cerrado se realiza con PWM bloqueado: detener, reconfigurar Timer/PWM/PR, rearmar fase y reiniciar WARMUP. La prueba de cambio de frecuencia en caliente del IP PWM es responsabilidad de Keylor y no implica que el controlador integrado pueda cambiar Ts sin rediseño.
+Un cambio de frecuencia del sistema cerrado se realiza con PWM bloqueado: detener, reconfigurar Timer/PWM/PR, rearmar fase y reiniciar WARMUP. La prueba de cambio de frecuencia en caliente del IP PWM corresponde a la validación del periférico PWM y no implica que el controlador integrado pueda cambiar Ts sin rediseño.
 
 ## 6. Arquitectura del firmware
 
@@ -245,13 +241,21 @@ Se mantienen INIT, WARMUP, RUNNING y FAULT como estados de control. El estado de
 
 ### 6.1. Inicialización y main
 
+![Inicialización y bucle principal del firmware.](figuras/05_inicializacion_bucle_principal.png)
+
+*Inicialización y bucle principal del firmware.*
+
 La inicialización mantiene las salidas bloqueadas, comprueba configuración y calibra a partir de valores suministrados. Después prepara coeficientes, memoria, drivers y sincronización. WARMUP establece la primera secuencia válida; RUNNING habilita el control cuando los contratos están satisfechos. Si falta calibración o PR válido, se permite diagnóstico con potencia deshabilitada.
 
-WARMUP mantiene portadora y disparos activos con compuertas bloqueadas; la primera IRQ del arranque no exige una muestra previa. La espera de una primera tupla válida tiene límite de períodos y diagnóstico de fallo. La liberación del bloqueo se solicita para un valle, con referencia limitada y PR inicializado; no por una escritura asíncrona que recorte un pulso. El contrato debe distinguir ENABLE de potencia, portadora activa y running. Si el PWM solo permite detener todo con ENABLE=0, este arranque no puede darse por válido y se rediseña con Keylor.
+WARMUP mantiene portadora y disparos activos con compuertas bloqueadas; la primera IRQ del arranque no exige una muestra previa. La espera de una primera tupla válida tiene límite de períodos y diagnóstico de fallo. La liberación del bloqueo se solicita para un valle, con referencia limitada y PR inicializado; no por una escritura asíncrona que recorte un pulso. El contrato debe distinguir ENABLE de potencia, portadora activa y running. Si el PWM solo permite detener todo con ENABLE=0, este arranque no puede darse por válido y se debe rediseñar su mecanismo de habilitación.
 
 Main filtra botones, publica cambios de amplitud, solicita snapshots y transmite un número acotado de bytes si la FIFO UART dispone de espacio. No transmite bloques completos dentro de una sección crítica ni deshabilita interrupciones durante el envío.
 
 ### 6.2. Atención periódica
+
+![Rutina periódica de control.](figuras/06_isr_control_periodico.png)
+
+*Rutina periódica de control.*
 
 1. Elevar GPIO_ISR y capturar el tiempo de entrada.
 2. Reconocer el Timer; distinguir WARMUP, RUNNING o FAULT.
@@ -296,6 +300,10 @@ Las funciones representan requisitos y no código compilable. El servicio de mai
 
 ## 7. Procesamiento y formato numérico
 
+![Ruta numérica del regulador.](figuras/08_ruta_numerica_pr.png)
+
+*Ruta numérica del regulador.*
+
 ### 7.1. Calibración y referencia
 
 La conversión es:
@@ -318,7 +326,7 @@ Si PEDP entrega un PR de segundo orden normalizado, el contrato se puede expresa
 
 $$u[k]=b_0e[k]+b_1e[k-1]+b_2e[k-2]-a_1u[k-1]-a_2u[k-2]$$
 
-La ecuación es una forma de interfaz, no una sintonización. Se registran a1, a2, b0, b1, b2, Ts, inicialización, unidades, límites y política de anti-windup de PEDP. Si la estructura entregada es diferente se adapta esta sección. No se cambian estados internos por una regla de anti-windup inventada.
+La ecuación es una forma de interfaz, no una sintonización. Se registran a1, a2, b0, b1, b2, Ts, inicialización, unidades, límites y política de anti-windup de PEDP. Si la estructura entregada es diferente se adapta esta sección. Los estados internos siguen la política de anti-windup especificada por PEDP.
 
 Para salida de control en voltios, m=u/Vdc; si PEDP entrega modulación normalizada, no se divide otra vez. Vdc debe estar medido o justificado como parámetro fijo de la fuente. Se limita m a ±m_max y se convierte al formato acordado:
 
@@ -329,6 +337,10 @@ Q1.15 representa [-1, 1−2^-15]. El límite final puede ser menor por el driver
 ## 8. Memoria y exportación UART
 
 ### 8.1. Bancos circulares
+
+![Captura circular y exportación mediante UART.](figuras/07_bancos_exportacion_uart.png)
+
+*Captura circular y exportación mediante UART.*
 
 Cada registro contiene raw_adc:uint16 e iref_mA:int16, serializados campo por campo. No se transmite una estructura C cruda con padding. El error de redondeo de iref_mA es como máximo 0,5 mA.
 
@@ -380,7 +392,7 @@ La adquisición sincronizada sirve para seguimiento de la componente de 50 Hz; n
 
 ## 9. Botones y medición temporal
 
-Se proponen eventos de GPIO para EXPORTAR, CAMBIAR_AMPLITUD y REARMAR; su asignación física se acuerda con Marvin. El antirrebote de firmware exige estado estable durante 20 ms medidos con base temporal, no mediante espera bloqueante. El evento se produce una sola vez por pulsación.
+Se proponen eventos de GPIO para EXPORTAR, CAMBIAR_AMPLITUD y REARMAR; su asignación física se define durante la integración de GPIO. El antirrebote de firmware exige estado estable durante 20 ms medidos con base temporal, no mediante espera bloqueante. El evento se produce una sola vez por pulsación.
 
 GPIO_ISR alto mide la ventana instrumentada. Período efectivo: Δt entre entradas sucesivas. Jitter de intervalo: Δt−Ts; reportar mínimo, máximo, media y desviación. Latencia: entrada ISR menos evento Timer; no confundirla con el período. Se compara una ejecución sin UART y otra exportando, durante al menos un millón de períodos (50 s a 20 kHz). Las métricas usan diferencias modulares de ADC_TICKS entre eventos consecutivos; se contabilizan secuencias perdidas y deadlines.
 
@@ -392,22 +404,20 @@ El límite de aceptación temporal es satisfacer todas las desigualdades de la s
 
 | ID | Acuerdo | Participantes | Condición de cierre |
 |---|---|---|---|
-| C1 | Tarjeta, canal, pinout y rango analógico | Marvin, Luis Diego, PEDP | Esquema y constraints verificados |
-| C2 | Offset, ganancia, signo y umbrales raw | Luis Diego, PEDP | Calibración registrada |
+| C1 | Tarjeta, canal, pinout y rango analógico | Plataforma, adquisición y PEDP | Esquema y constraints verificados |
+| C2 | Offset, ganancia, signo y umbrales raw | Adquisición y PEDP | Calibración registrada |
 | C3 | Ts, fPWM y fase de disparo | Equipo digital y PEDP | Presupuesto temporal y PR coherentes |
-| C4 | sync_start_i, posición inicial, latch y portadora independiente del bloqueo de compuertas | Marvin, Keylor, Luis Diego | Simulación conjunta sin deriva, prioridad de bloqueo y liberación en valle |
-| C5 | Formato, límites y registros PWM | Keylor y Luis Diego | Tabla y driver compatibles |
-| C6 | Ecuación PR, coeficientes y anti-windup | PEDP y Luis Diego | Vectores de referencia aprobados |
-| C7 | WCET float32, memoria, reloj de bus y combinación Vivado/Vitis/BSP | Marvin y Luis Diego | Tiempo/linker map aceptables y versiones registradas |
-| C8 | Reset de recuperación del wrapper/XADC y cotas CONVST/ADCCLK/watchdog | Marvin y Luis Diego | Sin respuesta tardía publicada; tiempos validados con dispositivo/IP |
+| C4 | sync_start_i, posición inicial, latch y portadora independiente del bloqueo de compuertas | Plataforma, PWM y firmware | Simulación conjunta sin deriva, prioridad de bloqueo y liberación en valle |
+| C5 | Formato, límites y registros PWM | PWM y firmware | Tabla y driver compatibles |
+| C6 | Ecuación PR, coeficientes y anti-windup | PEDP y firmware | Vectores de referencia aprobados |
+| C7 | WCET float32, memoria, reloj de bus y combinación Vivado/Vitis/BSP | Plataforma y firmware | Tiempo/linker map aceptables y versiones registradas |
+| C8 | Reset de recuperación del wrapper/XADC y cotas CONVST/ADCCLK/watchdog | Plataforma y firmware | Sin respuesta tardía publicada; tiempos validados con dispositivo/IP |
 
-El diseño es revisable con estos contratos identificados. La aprobación final del diseño y la habilitación del lazo dependen de cerrarlos; las pruebas listadas en el documento de verificación permanecen pendientes hasta contar con evidencia.
+La habilitación del lazo integrado requiere cerrar estos contratos y completar las pruebas de adquisición, temporización y firmware.
 
 ## 11. Referencias
 
 - Enunciado oficial EL3313_proyecto4_2S2026.pdf, secciones 4.2–4.3, 6 y 7; documento suministrado por el curso.
-- Division_Proyecto4_TDD.pdf y asignación explícita del equipo a Luis Diego.
-- [Issue #3: adquisición ADC/XADC, firmware y temporización](https://github.com/IE-TDD-EL3313/Proyecto_4/issues/3).
 - [R1 — AMD UG480: Event-Driven Sampling](https://docs.amd.com/r/en-US/ug480_7Series_XADC/Event-Driven-Sampling).
 - [R2 — AMD UG480: Instantiating the XADC](https://docs.amd.com/r/en-US/ug480_7Series_XADC/Instantiating-the-XADC).
 - [R3 — AMD UG480: Analog Inputs](https://docs.amd.com/r/en-US/ug480_7Series_XADC/Analog-Inputs).
@@ -421,4 +431,4 @@ El diseño es revisable con estos contratos identificados. La aprobación final 
 - [R11 — AMD embeddedsw: xtmrctr.c](https://github.com/Xilinx/embeddedsw/blob/master/XilinxProcessorIPLib/drivers/tmrctr/src/xtmrctr.c).
 - [R12 — AMD embeddedsw: xtmrctr_intr.c](https://github.com/Xilinx/embeddedsw/blob/master/XilinxProcessorIPLib/drivers/tmrctr/src/xtmrctr_intr.c).
 
-Referencias oficiales consultadas el 4 de noviembre de 2026. La configuración del driver y las IP se verifica contra la versión efectiva del proyecto.
+La configuración del driver y las IP se verifica contra la versión efectiva del proyecto.

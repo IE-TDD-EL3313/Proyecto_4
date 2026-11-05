@@ -1,18 +1,12 @@
-# Verificación y trazabilidad: adquisición, firmware y temporización
-
-**Responsable:** Luis Diego Álvarez
-
-**Referencia:** [Issue #3](https://github.com/IE-TDD-EL3313/Proyecto_4/issues/3)
+# Verificación de adquisición, firmware y temporización
 
 **Estado:** plan de pruebas; no se han ejecutado simulaciones RTL ni ensayos en FPGA.
-
-[Diseño principal](03_adquisicion_firmware_temporizacion.md) · [Diagramas](figuras/03_diagramas_adc_firmware.md)
 
 ## 1. Objetivo y registro de evidencia
 
 La verificación se realiza por subsistema antes de integrar potencia. Cada caso produce entrada reproducible, resultado esperado, observación real y PASS/FAIL. No se marca un caso aprobado por inspección de este documento. Cada evidencia conserva commit, versión Vivado/Vitis, configuración y parámetros aplicados.
 
-Se proponen tb/xadc_if/ para el banco del wrapper ADC, scripts/ para modelos y recepción, y resultados/adc_firmware/ para evidencias. Estas rutas se acuerdan con el equipo antes de implementar; este entregable solo agrega documentación.
+Se proponen tb/xadc_if/ para el banco del wrapper ADC, scripts/ para modelos y recepción, y resultados/adc_firmware/ para evidencias. Las rutas se fijan durante la integración de los bancos de pruebas y las herramientas de adquisición.
 
 ## 2. Adquisición y AXI4-Lite
 
@@ -49,7 +43,7 @@ Se verifican por separado el wrapper con modelo de respuestas XADC y la integrac
 | T03 | Arranque armado por generateout0 | Un sync_start_i por armado; fase inicial y latencia de registros conocidas |
 | T04 | Trigger en pico e IRQ en fase 3500 | Muestra publicada antes de ISR; escritura completada antes del valle |
 | T05 | Simulación de un millón de períodos | Sin deriva entre trigger, Timer y portadora |
-| T06 | ISR sin UART y exportando | Todas las cotas de la sección 5.3; cero pérdidas de secuencia y deadlines |
+| T06 | ISR sin UART y exportando | Todas las cotas de la sección 9.2.3 del planteamiento del diseño; cero pérdidas de secuencia y deadlines |
 | T07 | Retener servicios de fondo y pulsar botones | No modificar período de hardware ni exceder presupuesto ISR |
 | T08 | Forzar lectura tardía y ejecución excesiva | Detectar incumplimiento y entrar en FAULT; no continuar con dato viejo |
 | T09 | Wrap del contador RTL de 32 bits | Diferencias modulares correctas, sin falso jitter ni antigüedad negativa |
@@ -111,43 +105,6 @@ El CSV se confronta con la captura binaria y sus metadatos; la conversión no de
 3. Probar firmware con secuencias sintéticas y PWM bloqueado.
 4. Validar Timer, fase, lectura y escritura en FPGA sin etapa energizada.
 5. Confirmar calibración y tiempos efectivos.
-6. Coordinar con Keylor la comprobación de compuertas y tiempo muerto sin potencia.
+6. Comprobar compuertas y tiempo muerto del PWM con potencia desenergizada.
 7. Ejecutar ensayos integrados con PEDP y límites de operación.
-8. Adjuntar resultados y revisión cruzada al PR.
-
-## 7. Trazabilidad de criterios de aceptación del Issue #3
-
-| Criterio del issue | Sección o figura | Verificación |
-|---|---|---|
-| Arquitectura ADC/XADC documentada | Principal §3; D2–D4 | A01–A19 |
-| Sincronización con PWM definida | Principal §5.3; D9 | T03–T05, T11 |
-| AXI Timer especificado | Principal §5.1 | T01–T02, T10 |
-| Interrupciones documentadas | Principal §5.2, §6.2; D6 | T06–T08 |
-| Arquitectura firmware definida | Principal §6; D5 | F01, F09 |
-| Flujo de PR descrito | Principal §7; D6, D8 | F03–F08 |
-| Almacenamiento y UART | Principal §8; D7 | U01–U13 |
-| Diagramas técnicos incluidos | Archivo de figuras D1–D10 y Lucid | Revisión visual y semántica |
-| Estrategia de verificación | Este documento y D10 | Revisión de cobertura |
-| Contenido en docs/diseno/ | Tres documentos y enlaces desde planteamiento.md | Comprobar diff del PR |
-| Revisión mediante Pull Request | Rama docs/adc-firmware-design → develop | Pendiente de publicación/revisión |
-
-La documentación no marca el issue como completado ni sustituye la aceptación del profesor. Los contratos pendientes del diseño principal deben cerrarse y el PR debe pasar revisión. El informe final agregará valores reales, capturas y resultados, sin presentar este plan como evidencia experimental.
-
-## 8. Revisión documental ejecutada el 4 de noviembre de 2026
-
-| Comprobación | Resultado y alcance |
-|---|---|
-| Base y alcance | Rama docs/adc-firmware-design alineada con origin/develop en 32c4a65 antes de editar; sin cambios locales previos; sin AGENTS.md aplicable encontrado |
-| Fuentes recuperadas | Tres Markdown del ZIP anterior, enunciado EL3313_proyecto4_2S2026.pdf, reparto genérico, Issues #2/#3 y diez páginas existentes de Lucid |
-| Revisión técnica | Contrastados Timer descendente con PG079, SetResetValue/orden del handler con código oficial AMD y conversión/DRP con UG480; BSP concreto pendiente |
-| Enlaces relativos | 29 destinos/anclas resueltos en los cuatro Markdown revisados; dos referencias a imágenes generales ausentes ya existían en la plantilla |
-| Markdown | Cercos balanceados y diff sin errores de espacios; apartados de Marvin/Keylor conservados |
-| Mermaid | Sintaxis de D1–D10 validada con Mermaid 12.3.0; diez SVG/PNG renderizados localmente con Edge headless y revisados visualmente |
-| Cálculos | TLR=9998/4998/3998; bancos=16384 bytes; trama completa=8244 bytes; tiempo UART mínimo=0,715625 s; ventana entre extremos=102,35 ms; mínimo de 2001 muestras para cinco períodos a 20 kHz |
-| CRC32 de referencia | Cálculo independiente de ASCII 123456789 dio 0xCBF43926; solo verifica el vector, todavía no un transmisor/receptor implementado |
-| Cobertura del plan | 52 casos propuestos: 19 ADC/AXI, 11 temporales, 9 firmware y 13 UART/memoria; trazabilidad hacia criterios del Issue #3 |
-| Hardware/software real | No se ejecutaron RTL, síntesis, compilación Vitis, medición WCET ni ensayos FPGA/PEDP; todos permanecen pendientes |
-
-Los dos destinos preexistentes ausentes son `figuras/diagrama_primer_nivel.png` y `figuras/diagrama_segundo_nivel.png`, correspondientes a los diagramas generales del equipo. Esta revisión agrega figuras del subsistema de Luis Diego y no sustituye esas figuras globales. La tabla de correspondencia de Lucid identifica ADC_TICKS, recuperación por reset, arranque armado y D10 de verificación como ampliaciones del Markdown.
-
-La sintaxis y el render local no garantizan el mismo motor o distribución visual en todas las versiones de GitHub. Las vistas previas y dependencias de validación se conservaron temporalmente fuera de Proyecto_4; el contenido versionado sigue siendo Markdown editable, sin RTL, firmware ni dependencias de compilación nuevas.
+8. Consolidar los resultados y comprobar los criterios de aceptación.
