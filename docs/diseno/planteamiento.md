@@ -120,33 +120,7 @@ Todo el periférico trabaja con el reloj de 100 MHz del sistema (`s_axi_aclk`) y
 | `s_a`, `s_b` | 1 bit | Señal de conmutación de cada pierna, antes del tiempo muerto. |
 | `running` | 1 bit | Indica que el generador está activo. |
 
-<!-- Reemplazar por figuras/tercer_nivel_pwm.png -->
-```mermaid
-flowchart TB
-    subgraph TOP["pwm_controller_axi"]
-        AXI["Registros AXI4-Lite<br/>CTRL · DUTY · DEADTIME"]
-        SH["Registros sombra"]
-        CAR["Generador de portadora"]
-        CMP["Comparador unipolar"]
-        DTA["Tiempo muerto A"]
-        DTB["Tiempo muerto B"]
-        TRG["Generador de trigger"]
-        AXI --> SH
-        SH --> CAR
-        SH --> CMP
-        CAR -- "c" --> CMP
-        CMP -- "s_a" --> DTA
-        CMP -- "s_b" --> DTB
-        SH -- "dead_time" --> DTA
-        SH -- "dead_time" --> DTB
-        CAR -- "valley" --> TRG
-        CAR -- "valley" --> SH
-        CAR -. "running" .-> AXI
-    end
-    DTA --> GA["gate_ah_o / gate_al_o"]
-    DTB --> GB["gate_bh_o / gate_bl_o"]
-    TRG --> T["pwm_trigger_o"]
-```
+![Diagrama de tercer nivel — PWM Controller](figuras/tercer_nivel_pwm.png)
 
 #### Explicación del bloque
 
@@ -189,7 +163,6 @@ Permitir que el MicroBlaze V configure el PWM y lea su estado por medio del bus 
 | Canales B, R, `awready`, `wready`, `arready` | Salida | Respuestas AXI4-Lite. |
 | `enable`, `freq_sel`, `duty_ref`, `dead_time` | Salida | Configuración hacia los registros sombra. |
 
-<!-- Reemplazar por figuras/cuarto_nivel_pwm_axi.png -->
 ```mermaid
 stateDiagram-v2
     direction LR
@@ -208,6 +181,18 @@ stateDiagram-v2
         R_DATA --> R_IDLE: RREADY
     }
 ```
+
+| Estado | `AWREADY` | `WREADY` | `BVALID` |
+|---|:---:|:---:|:---:|
+| `W_IDLE` | 1 | 1 | 0 |
+| `W_HAVE_AW` | 0 | 1 | 0 |
+| `W_HAVE_W` | 1 | 0 | 0 |
+| `W_RESP` | 0 | 0 | 1 (con `BRESP = OKAY`) |
+
+| Estado | `ARREADY` | `RVALID` |
+|---|:---:|:---:|
+| `R_IDLE` | 1 | 0 |
+| `R_DATA` | 0 | 1 |
 
 #### Funcionamiento
 
@@ -258,6 +243,8 @@ Generar la portadora triangular que usan las dos piernas, con la frecuencia que 
 | `c` | Salida | Valor actual de la portadora (14 bits). |
 | `valley` | Salida | Pulso cuando `c = 0`. |
 | `running` | Salida | 1 mientras el generador está activo. |
+
+![Diagrama de cuarto nivel — Generador de portadora](figuras/cuarto_nivel_portadora.png)
 
 #### Funcionamiento
 
@@ -341,6 +328,10 @@ $$
 
 Por ejemplo, a 20 kHz (N = 2500) con $m = 0{,}5$, los umbrales son $th_A = 1875$ y $th_B = 625$: la pierna A conduce el 75 % del período, la B el 25 %, y en la carga queda $0{,}5\,V_{dc}$.
 
+![Formas de onda de la modulación PWM unipolar](figuras/ondas_pwm_unipolar.png)
+
+En la figura se ve que en el valle de la portadora las dos piernas conducen por arriba y en el pico ninguna, así que en ambos instantes $v_{AB} = 0$. Entre esos puntos aparecen los pulsos de $+V_{dc}$: dos por período, por eso la componente principal del voltaje en la carga está en $2 f_{sw}$.
+
 #### Diseño y justificación técnica
 
 Escogimos Q1.15 porque la referencia que sale del PR es una senoidal con valores positivos y negativos, y este formato la representa directamente con la máxima resolución que permiten 16 bits. Además, como la relación entre `duty_ref` y el voltaje es lineal, para el diseño del PR el modulador es solo una ganancia de $V_{dc}$.
@@ -382,7 +373,6 @@ Producir las dos compuertas complementarias de cada pierna, asegurando que nunca
 | `running` | Entrada | Si es 0, las compuertas se apagan. |
 | `gate_h`, `gate_l` | Salida | Compuertas del transistor superior e inferior. |
 
-<!-- Reemplazar por figuras/cuarto_nivel_tiempo_muerto.png -->
 ```mermaid
 stateDiagram-v2
     [*] --> OFF
