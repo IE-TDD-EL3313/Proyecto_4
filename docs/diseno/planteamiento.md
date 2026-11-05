@@ -86,67 +86,59 @@ Cada apartado de este nivel incluye: tabla de **señales de entrada**, tabla de 
 
 ### 6.2 Periférico PWM personalizado (PWM Controller)
 
-El PWM Controller es el periférico personalizado obligatorio del proyecto. Convierte la acción de control calculada por el MicroBlaze V en las cuatro señales de compuerta del puente H mediante **modulación PWM unipolar con tiempo muerto configurable**. Además genera la señal `pwm_trigger_o`, que indica a la interfaz ADC/XADC el instante en que debe muestrear la corriente de carga. No existe un IP de Xilinx que implemente esta función de forma directa, por lo que se diseña en SystemVerilog con interfaz esclava AXI4-Lite completa.
+El PWM Controller es el periférico que nos toca diseñar desde cero, ya que Vivado no trae un IP que haga modulación unipolar con tiempo muerto para un puente H. Recibe desde el MicroBlaze V el ciclo de trabajo calculado por el regulador PR y genera las cuatro señales de compuerta del puente H. También genera `pwm_trigger_o`, que le indica al ADC cuándo tomar la muestra de corriente.
 
-Todo el periférico opera en **un solo dominio de reloj** (`s_axi_aclk`, 100 MHz), con reset síncrono activo en bajo (`s_axi_aresetn`).
+Todo el periférico trabaja con el reloj de 100 MHz del sistema (`s_axi_aclk`) y el reset activo en bajo (`s_axi_aresetn`), así que no hay cruces entre dominios de reloj.
 
 #### Señales de entrada
 
 | Señal | Ancho | Dirección | Descripción |
 |---|---:|---|---|
-| `s_axi_aclk` | 1 bit | Entrada | Reloj de 100 MHz, el mismo del MicroBlaze V. |
-| `s_axi_aresetn` | 1 bit | Entrada | Reset síncrono, activo en bajo. |
-| `s_axi_awaddr`, `s_axi_awvalid` | 4 / 1 bit | Entrada | Canal de dirección de escritura AXI4-Lite. |
-| `s_axi_wdata`, `s_axi_wstrb`, `s_axi_wvalid` | 32 / 4 / 1 bit | Entrada | Canal de datos de escritura. |
-| `s_axi_bready` | 1 bit | Entrada | El maestro acepta la respuesta de escritura. |
-| `s_axi_araddr`, `s_axi_arvalid` | 4 / 1 bit | Entrada | Canal de dirección de lectura. |
-| `s_axi_rready` | 1 bit | Entrada | El maestro acepta el dato leído. |
-| `fault_i` | 1 bit | Entrada | (Opcional) Falla externa, activa en alto. Apaga las compuertas. Se conecta a 0 si no se usa. |
+| `s_axi_aclk` | 1 bit | Entrada | Reloj de 100 MHz. |
+| `s_axi_aresetn` | 1 bit | Entrada | Reset activo en bajo. |
+| Canales AW, W y AR | — | Entrada | Dirección y datos de escritura y lectura del bus AXI4-Lite. |
+| `s_axi_bready`, `s_axi_rready` | 1 bit | Entrada | El MicroBlaze V acepta la respuesta de escritura o el dato leído. |
 
 #### Señales de salida
 
 | Señal | Ancho | Dirección | Descripción |
 |---|---:|---|---|
-| `s_axi_awready`, `s_axi_wready` | 1 bit | Salida | El esclavo acepta dirección y dato de escritura. |
-| `s_axi_bresp`, `s_axi_bvalid` | 2 / 1 bit | Salida | Respuesta de escritura (siempre `OKAY`). |
-| `s_axi_arready` | 1 bit | Salida | El esclavo acepta la dirección de lectura. |
-| `s_axi_rdata`, `s_axi_rresp`, `s_axi_rvalid` | 32 / 2 / 1 bit | Salida | Dato leído y respuesta. |
+| Canales B y R, `awready`, `wready`, `arready` | — | Salida | Respuestas del esclavo AXI4-Lite. |
 | `gate_ah_o`, `gate_al_o` | 1 bit | Salida | Compuertas alta y baja de la pierna A. |
 | `gate_bh_o`, `gate_bl_o` | 1 bit | Salida | Compuertas alta y baja de la pierna B. |
-| `pwm_trigger_o` | 1 bit | Salida | Pulso de sincronización hacia la interfaz ADC/XADC. |
+| `pwm_trigger_o` | 1 bit | Salida | Pulso de sincronización hacia el ADC. |
 
-#### Señales internas relevantes (entre subbloques)
+#### Señales internas relevantes
 
-| Señal | Ancho | Origen → Destino | Descripción |
-|---|---:|---|---|
-| `enable_r`, `freq_sel_r` | 1 / 2 bits | Registros AXI → registros sombra | Valores escritos por software en CTRL_STATUS. |
-| `duty_ref_r` | 16 bits | Registros AXI → registros sombra | Índice de modulación ya saturado (Q1.15). |
-| `dead_time_r` | 10 bits | Registros AXI → registros sombra | Tiempo muerto ya saturado, en ciclos. |
-| `running` | 1 bit | Generador de portadora → registros AXI | Estado real del generador (bit RO). |
-| `c` | 14 bits | Generador de portadora → comparador | Valor actual de la portadora triangular. |
-| `valley` | 1 bit | Generador de portadora → sombra / trigger | Pulso de un ciclo cuando `c = 0`. |
-| `N_sh` | 14 bits | Registros sombra → portadora / comparador | Pico de la portadora para la frecuencia activa. |
-| `s_a`, `s_b` | 1 bit | Comparador → tiempo muerto A / B | Señal ideal de conmutación de cada pierna, sin tiempo muerto. |
+| Señal | Ancho | Descripción |
+|---|---:|---|
+| `enable`, `freq_sel` | 1 / 2 bits | Configuración escrita por software. |
+| `duty_ref` | 16 bits | Referencia de modulación, ya saturada. |
+| `dead_time` | 10 bits | Tiempo muerto en ciclos de reloj, ya saturado. |
+| `c` | 14 bits | Valor de la portadora triangular. |
+| `valley` | 1 bit | Indica que la portadora está en cero (inicio del período). |
+| `s_a`, `s_b` | 1 bit | Señal de conmutación de cada pierna, antes del tiempo muerto. |
+| `running` | 1 bit | Indica que el generador está activo. |
 
-<!-- Reemplazar el Mermaid por figuras/tercer_nivel_pwm.png cuando esté dibujado -->
+<!-- Reemplazar por figuras/tercer_nivel_pwm.png -->
 ```mermaid
 flowchart TB
     subgraph TOP["pwm_controller_axi"]
-        AXI["Registros AXI4-Lite<br/>CTRL · DUTY · DEADTIME<br/>+ saturación"]
-        SH["Registros sombra<br/>(carga en el valle)"]
-        CAR["Generador de portadora<br/>contador up/down"]
-        CMP["Comparador unipolar<br/>pierna A y pierna B"]
+        AXI["Registros AXI4-Lite<br/>CTRL · DUTY · DEADTIME"]
+        SH["Registros sombra"]
+        CAR["Generador de portadora"]
+        CMP["Comparador unipolar"]
         DTA["Tiempo muerto A"]
         DTB["Tiempo muerto B"]
         TRG["Generador de trigger"]
         AXI --> SH
-        SH -- "N_sh" --> CAR
-        SH -- "duty_sh, N_sh" --> CMP
+        SH --> CAR
+        SH --> CMP
         CAR -- "c" --> CMP
         CMP -- "s_a" --> DTA
         CMP -- "s_b" --> DTB
-        SH -- "dt_sh" --> DTA
-        SH -- "dt_sh" --> DTB
+        SH -- "dead_time" --> DTA
+        SH -- "dead_time" --> DTB
         CAR -- "valley" --> TRG
         CAR -- "valley" --> SH
         CAR -. "running" .-> AXI
@@ -158,26 +150,11 @@ flowchart TB
 
 #### Explicación del bloque
 
-El periférico se organiza en cinco subbloques, detallados en el cuarto nivel (sección 7):
+El software escribe la configuración en los registros AXI4-Lite. Esos valores no pasan directo a la modulación: primero se copian a unos registros sombra, y esa copia solo se hace cuando la portadora llega a cero (el valle). Con esto evitamos que un cambio de ciclo de trabajo o de frecuencia a mitad del período deje un pulso cortado en las compuertas.
 
-1. **Registros AXI4-Lite (7.1):** reciben las escrituras del MicroBlaze V, saturan `duty_ref` y `dead_time` y devuelven los valores al leer, incluido el bit `running`.
-2. **Generador de portadora (7.2):** contador ascendente/descendente que produce una portadora triangular de período `2N` ciclos. `N` depende de `freq_sel`. También genera el pulso `valley`, que sincroniza la carga de registros sombra y el trigger.
-3. **Comparador unipolar (7.3):** convierte `duty_ref` en un umbral por pierna y lo compara con la portadora para obtener `s_a` y `s_b`.
-4. **Generador de tiempo muerto (7.4):** una instancia por pierna. A partir de `s_a` o `s_b` produce el par de compuertas complementarias con un intervalo de `dead_time` ciclos en el que ambas permanecen apagadas.
-5. **Generador de trigger (7.5):** produce `pwm_trigger_o` en el valle de la portadora.
+El generador de portadora es un contador que sube y baja, formando un triángulo. El comparador usa esa portadora y `duty_ref` para decidir cuándo conduce el transistor superior de cada pierna (`s_a` y `s_b`). Después, cada pierna pasa por un generador de tiempo muerto que produce el par de compuertas complementarias. Por último, en cada valle de la portadora se genera el pulso `pwm_trigger_o` para el ADC.
 
-Los valores escritos por software no actúan directamente sobre la modulación. Pasan por **registros sombra** que se cargan únicamente en el valle de la portadora. Así, un cambio de ciclo de trabajo, frecuencia o tiempo muerto nunca deja un período truncado ni produce glitches en las compuertas.
-
-**Parámetros del IP (SystemVerilog `parameter`):**
-
-| Parámetro | Valor por defecto | Significado |
-|---|---|---|
-| `N_TABLE` | {10000, 5000, 2500, 1250} | Pico del contador por código de `freq_sel`. |
-| `DUTY_MAX` | `16'sh7999` (≈ 0,95) | Límite de saturación simétrico de `duty_ref`. |
-| `DT_MIN` / `DT_MAX` | 20 / 1023 ciclos | Límites de saturación del tiempo muerto. |
-| `DT_RESET` | 100 ciclos (1 µs) | Tiempo muerto después del reset. |
-| `TRIG_WIDTH` | 4 ciclos | Ancho del pulso `pwm_trigger_o`. |
-| `GATE_ACTIVE_HIGH` | 1 | Polaridad de las compuertas según el driver. |
+Los subbloques se detallan en las secciones 7.1 a 7.5.
 
 ### 6.3 Adquisición de corriente (interfaz ADC/XADC)
 
@@ -201,25 +178,16 @@ Cada subbloque de este nivel sigue el mismo formato:
 
 #### Objetivo
 
-Implementar la interfaz esclava AXI4-Lite por la que el MicroBlaze V configura y monitorea el periférico. Contiene el banco de registros CTRL_STATUS, DUTY_REF y DEADTIME, aplica la saturación de los valores escritos y expone el estado `running`.
+Permitir que el MicroBlaze V configure el PWM y lea su estado por medio del bus AXI4-Lite.
 
-#### Entradas
+#### Entradas y salidas
 
-| Señal | Ancho | Dirección | Descripción |
-|---|---:|---|---|
-| `s_axi_aclk`, `s_axi_aresetn` | 1 bit | Entrada | Reloj y reset. |
-| Canales AW, W, AR y señales `BREADY`, `RREADY` | — | Entrada | Interfaz AXI4-Lite desde la interconexión. |
-| `running` | 1 bit | Entrada | Estado real del generador, desde el generador de portadora. |
-
-#### Salidas
-
-| Señal | Ancho | Dirección | Descripción |
-|---|---:|---|---|
-| `AWREADY`, `WREADY`, `BRESP`, `BVALID`, `ARREADY`, `RDATA`, `RRESP`, `RVALID` | — | Salida | Respuestas AXI4-Lite. |
-| `enable_r` | 1 bit | Salida | Bit `enable` de CTRL_STATUS. |
-| `freq_sel_r` | 2 bits | Salida | Campo `freq_sel` de CTRL_STATUS. |
-| `duty_ref_r` | 16 bits | Salida | `duty_ref` saturado. |
-| `dead_time_r` | 10 bits | Salida | `dead_time` saturado. |
+| Señal | Dirección | Descripción |
+|---|---|---|
+| Canales AW, W, AR, `bready`, `rready` | Entrada | Transacciones de escritura y lectura del MicroBlaze V. |
+| `running` | Entrada | Estado del generador, para el bit de solo lectura. |
+| Canales B, R, `awready`, `wready`, `arready` | Salida | Respuestas AXI4-Lite. |
+| `enable`, `freq_sel`, `duty_ref`, `dead_time` | Salida | Configuración hacia los registros sombra. |
 
 <!-- Reemplazar por figuras/cuarto_nivel_pwm_axi.png -->
 ```mermaid
@@ -227,80 +195,51 @@ stateDiagram-v2
     direction LR
     state "Escritura" as W {
         [*] --> W_IDLE
-        W_IDLE --> W_HAVE_AW: AWVALID ∧ ¬WVALID
-        W_IDLE --> W_HAVE_W: WVALID ∧ ¬AWVALID
-        W_IDLE --> W_RESP: AWVALID ∧ WVALID / escribir
-        W_HAVE_AW --> W_RESP: WVALID / escribir
-        W_HAVE_W --> W_RESP: AWVALID / escribir
+        W_IDLE --> W_HAVE_AW: llega AW
+        W_IDLE --> W_HAVE_W: llega W
+        W_IDLE --> W_RESP: llegan AW y W / escribir
+        W_HAVE_AW --> W_RESP: llega W / escribir
+        W_HAVE_W --> W_RESP: llega AW / escribir
         W_RESP --> W_IDLE: BREADY
     }
     state "Lectura" as R {
         [*] --> R_IDLE
-        R_IDLE --> R_DATA: ARVALID / registrar RDATA
+        R_IDLE --> R_DATA: ARVALID
         R_DATA --> R_IDLE: RREADY
     }
 ```
 
-#### Relación con los demás módulos
-
-Recibe las transacciones del MicroBlaze V a través de la interconexión AXI y entrega los valores configurados a los registros sombra. Recibe `running` del generador de portadora para que el software pueda leerlo.
-
-**MicroBlaze V → interconexión AXI → registros AXI4-Lite → registros sombra → núcleo PWM**
-
 #### Funcionamiento
 
-La interfaz implementa los cinco canales de AXI4-Lite con dos máquinas de estados independientes, una de escritura y otra de lectura:
+La escritura y la lectura se manejan con dos máquinas de estados separadas. En la escritura, la dirección (AW) y el dato (W) pueden llegar en cualquier orden, así que la máquina guarda el que llegue primero y espera al otro. Cuando tiene los dos, escribe el registro y responde con `BVALID`. En la lectura, al recibir la dirección se carga el dato en `RDATA` y se activa `RVALID` hasta que el procesador lo recibe.
 
-- **Escritura:** los canales AW y W pueden llegar en cualquier orden o en el mismo ciclo. La FSM guarda el que llegue primero y espera al otro. Cuando tiene ambos, escribe el registro direccionado respetando `WSTRB` y emite `BVALID` con `BRESP = OKAY`. Vuelve a `W_IDLE` cuando el maestro acepta la respuesta (`BREADY`).
-- **Lectura:** al aceptar `ARVALID`, se registra el dato del registro direccionado en `RDATA` y se emite `RVALID` con `RRESP = OKAY`. El dato se mantiene estable hasta `RREADY`.
+El registro se selecciona con los bits `[3:2]` de la dirección: 0 es CTRL_STATUS, 1 es DUTY_REF y 2 es DEADTIME (el mapa completo está en la sección 8.2).
 
-La dirección se decodifica con los bits `[3:2]`:
-
-$$
-\text{reg\_idx} = \text{addr}[3:2] \in \{0: \text{CTRL\_STATUS},\ 1: \text{DUTY\_REF},\ 2: \text{DEADTIME},\ 3: \text{no implementado}\}
-$$
-
-La saturación se aplica al escribir, sobre el valor resultante después de aplicar `WSTRB`:
+Al escribir `duty_ref` o `dead_time`, el valor se satura antes de guardarse:
 
 $$
-\text{duty\_ref\_r} =
-\begin{cases}
-+\text{DUTY\_MAX}, & \text{si } d > +\text{DUTY\_MAX} \\
--\text{DUTY\_MAX}, & \text{si } d < -\text{DUTY\_MAX} \\
-d, & \text{en otro caso}
-\end{cases}
-\qquad
-\text{dead\_time\_r} = \min(\max(t, \text{DT\_MIN}), \text{DT\_MAX})
+duty\_ref = \min(\max(d,\ -\text{DUTY\_MAX}),\ +\text{DUTY\_MAX}), \qquad dead\_time = \min(\max(t,\ 20),\ 1023)
 $$
 
 #### Diseño y justificación técnica
 
-- **FSM de escritura que acepta AW y W en cualquier orden:** la especificación AXI (UG1037) no garantiza el orden de estos canales. Un esclavo que exija AW antes que W puede bloquear la interconexión.
-- **Saturación en la escritura, no en la lectura ni en el núcleo:** el valor almacenado siempre es válido, y el software detecta la saturación comparando lo escrito con lo leído. Esto cumple el requisito del enunciado de saturar toda escritura fuera de rango.
-- **Respuesta `OKAY` en direcciones no mapeadas** (lectura 0, escritura ignorada): un error de software no genera una excepción de bus que detenga el lazo de control.
-- **Registro DEADTIME adicional (0x08):** el enunciado exige tiempo muerto configurable, pero no define un campo para ello en 0x00 ni en 0x04. Se agrega un tercer registro sin modificar los dos especificados.
+Aceptamos AW y W en cualquier orden porque el estándar AXI no garantiza cuál llega primero. Un esclavo que espere siempre a AW primero podría quedarse trabado.
+
+La saturación se hace al momento de escribir, y lo que se lee de vuelta es el valor ya saturado. Así cumplimos lo que pide el enunciado, y desde software se puede saber si hubo saturación comparando lo escrito con lo leído.
+
+El enunciado pide tiempo muerto configurable, pero los registros 0x00 y 0x04 no tienen un campo para eso. Por eso agregamos el registro DEADTIME en 0x08, sin cambiar los otros dos.
 
 #### Comportamiento durante el reset
 
-Mientras `s_axi_aresetn = 0`:
-
-$$
-\text{CTRL\_STATUS} = 0, \quad \text{DUTY\_REF} = 0, \quad \text{DEADTIME} = \text{DT\_RESET} = 100
-$$
-
-y todas las señales `*VALID` y `*READY` del esclavo permanecen en 0, como exige la especificación AXI. Ambas FSM regresan a su estado `IDLE`.
+Todos los registros vuelven a 0, excepto DEADTIME, que arranca en 100 ciclos (1 µs). Las salidas `VALID` del bus quedan en 0.
 
 #### Casos especiales y condiciones de borde
 
-- Escritura de `0x8000` (−1,0) en DUTY_REF: se satura a −`DUTY_MAX`.
-- Escritura de 1 en el bit `running` (3): se ignora, porque el bit es de solo lectura.
-- `WSTRB` parcial: solo se modifican los bytes habilitados, y luego se aplica la saturación.
-- `BREADY` o `RREADY` en 0 durante varios ciclos: la FSM espera sin aceptar nuevas transacciones y sin cambiar `RDATA`, `BRESP` ni `RRESP`.
-- Lectura y escritura simultáneas: las FSM son independientes, así que ambas se atienden.
+Si se escribe en una dirección que no existe, se responde normalmente (`OKAY`), no se guarda nada y la lectura devuelve 0. Escribir en el bit `running` no tiene efecto porque es de solo lectura.
 
 #### Estrategia de validación
 
-Testbench con tareas BFM `axi_write` y `axi_read`. Se verifican los valores de reset, la lectura/escritura de cada campo, los bits reservados (se leen en 0), el bit RO, `WSTRB` parcial, el orden AW/W (antes, después y simultáneo), el backpressure en `BREADY`/`RREADY`, las direcciones no mapeadas y la saturación con valores de borde. Pruebas T1–T8 de la sección 12.1.
+En el testbench se escriben y leen todos los registros, incluyendo valores fuera de rango y los dos órdenes posibles de AW y W.
 
 ---
 
@@ -308,94 +247,54 @@ Testbench con tareas BFM `axi_write` y `axi_read`. Se verifican los valores de r
 
 #### Objetivo
 
-Generar la portadora triangular común a ambas piernas, con un período determinado por `freq_sel`. También indica el valle de la portadora y el estado `running`.
+Generar la portadora triangular que usan las dos piernas, con la frecuencia que indique `freq_sel`.
 
-#### Entradas
+#### Entradas y salidas
 
-| Señal | Ancho | Dirección | Descripción |
-|---|---:|---|---|
-| `clk`, `rst_n` | 1 bit | Entrada | Reloj de 100 MHz y reset. |
-| `enable_r` | 1 bit | Entrada | Habilitación escrita por software. |
-| `fault_i` | 1 bit | Entrada | Falla externa (opcional). |
-| `N_sh` | 14 bits | Entrada | Pico de la portadora para la frecuencia activa (registro sombra). |
-
-#### Salidas
-
-| Señal | Ancho | Dirección | Descripción |
-|---|---:|---|---|
-| `c` | 14 bits | Salida | Valor actual de la portadora, de 0 a N. |
-| `valley` | 1 bit | Salida | Pulso de un ciclo cuando `c = 0` (inicio de período). |
-| `running` | 1 bit | Salida | 1 mientras el generador está activo. |
-
-<!-- Reemplazar por figuras/cuarto_nivel_portadora.png -->
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> RUN: enable ∧ ¬fault / c := 0, cargar sombra
-    RUN --> IDLE: ¬enable ∨ fault / compuertas := 0
-    note right of RUN: running = 1, el contador sube y baja
-    note right of IDLE: running = 0, c = 0, compuertas = 0
-```
-
-#### Relación con los demás módulos
-
-**Registros sombra (`N_sh`) → generador de portadora → `c` → comparador unipolar**
-
-**Generador de portadora → `valley` → registros sombra / generador de trigger**
+| Señal | Dirección | Descripción |
+|---|---|---|
+| `enable` | Entrada | Habilita el generador. |
+| `N` | Entrada | Valor máximo de la portadora, según `freq_sel`. |
+| `c` | Salida | Valor actual de la portadora (14 bits). |
+| `valley` | Salida | Pulso cuando `c = 0`. |
+| `running` | Salida | 1 mientras el generador está activo. |
 
 #### Funcionamiento
 
-El generador es un contador ascendente/descendente. En `RUN`, sube de 0 a N y baja de N a 0:
-
-$$
-c_{next} =
-\begin{cases}
-c + 1, & \text{si } dir = \text{up} \wedge c < N - 1 \\
-N,\ dir := \text{down}, & \text{si } dir = \text{up} \wedge c = N - 1 \\
-c - 1, & \text{si } dir = \text{down} \wedge c > 1 \\
-0,\ dir := \text{up}, & \text{si } dir = \text{down} \wedge c = 1
-\end{cases}
-\qquad
-valley = (c = 0) \wedge running
-$$
-
-Un período completo dura $2N$ ciclos de reloj, por lo que:
+La portadora es un contador que sube de 0 a N y luego baja de N a 0. Un período completo dura 2N ciclos de reloj, entonces la frecuencia de conmutación es:
 
 $$
 f_{sw} = \frac{f_{clk}}{2N} = \frac{100\ \text{MHz}}{2N}
 $$
 
-| `freq_sel` | N | Período (ciclos) | $f_{sw}$ por transistor | Componente dominante en $v_{AB}$ | Resolución ($\log_2 N$) |
-|---|---:|---:|---:|---:|---:|
-| `00` | 10000 | 20000 | 5 kHz | 10 kHz | ≈ 13,3 bits |
-| `01` | 5000 | 10000 | 10 kHz | 20 kHz | ≈ 12,3 bits |
-| `10` | 2500 | 5000 | 20 kHz | 40 kHz | ≈ 11,3 bits |
-| `11` | 1250 | 2500 | 40 kHz | 80 kHz | ≈ 10,3 bits |
+| `freq_sel` | N | $f_{sw}$ |
+|---|---:|---:|
+| `00` | 10000 | 5 kHz |
+| `01` | 5000 | 10 kHz |
+| `10` | 2500 | 20 kHz |
+| `11` | 1250 | 40 kHz |
 
-En PWM unipolar, la componente predominante de la tensión diferencial de salida está en $2 f_{sw}$, mientras que cada transistor conmuta a $f_{sw}$.
+Como la modulación es unipolar, cada transistor conmuta a $f_{sw}$, pero la tensión en la carga tiene su componente principal en $2 f_{sw}$.
+
+Cuando `enable` pasa a 1, el contador arranca desde 0 y `running` se pone en 1. Cuando `enable` pasa a 0, el contador se detiene, `running` vuelve a 0 y las compuertas se apagan de inmediato.
 
 #### Diseño y justificación técnica
 
-- **Portadora triangular (PWM centrado):** los flancos de ambas piernas quedan simétricos dentro del período, y el valle es un instante natural de muestreo (ver 7.5). Además, cargar los registros sombra en el valle evita pulsos truncados.
-- **Cuatro códigos válidos:** el enunciado exige al menos tres. Con los cuatro códigos válidos no existe un `freq_sel` inválido que manejar.
-- **N entero y un único reloj:** las frecuencias son exactas y no se necesita un reloj adicional. El contador cabe en 14 bits.
-- **Valores dependientes de PEDP:** `N_TABLE` es un parámetro. Si el equipo de potencia elige otra frecuencia, solo cambia la tabla.
+Usamos una portadora triangular y no diente de sierra porque los pulsos quedan centrados en el período y el valle sirve como instante de muestreo (ver 7.5). Elegimos valores de N que dan frecuencias exactas con el reloj de 100 MHz, y usamos los cuatro códigos de `freq_sel` para que no haya ninguno inválido. Las frecuencias son una propuesta inicial: si el equipo de potencia escoge otra, solo se cambia la tabla de N.
+
+Al deshabilitar, las compuertas se apagan sin esperar a que termine el período, porque en el puente H es más seguro apagar todo de una vez.
 
 #### Comportamiento durante el reset
 
-$$
-rst\_n = 0 \Rightarrow c = 0,\ dir = \text{up},\ running = 0,\ valley = 0
-$$
+El contador queda en 0, `running` en 0 y no hay pulsos de `valley`.
 
 #### Casos especiales y condiciones de borde
 
-- **Cambio de `freq_sel` con el generador activo:** el nuevo N se aplica en el siguiente valle, y nunca aparece un período de longitud intermedia.
-- **`enable` = 0 o `fault_i` = 1:** paso inmediato a `IDLE`. El apagado no espera al valle, por seguridad del puente H.
-- **Reactivación:** el generador arranca siempre desde `c = 0`, con los registros sombra recién cargados.
+Si se cambia `freq_sel` con el PWM funcionando, el nuevo valor de N se aplica en el siguiente valle, nunca a mitad de un período.
 
 #### Estrategia de validación
 
-Medición en simulación del número de ciclos entre valles consecutivos para cada `freq_sel` (debe ser exactamente 2N), cambio de frecuencia en caliente sin períodos intermedios y comportamiento de `running` con `enable` y `fault_i`. Pruebas T9, T10 y T16.
+Para cada `freq_sel` se mide en simulación el número de ciclos entre dos valles, que debe ser 2N. También se prueba cambiar la frecuencia con el generador activo.
 
 ---
 
@@ -403,88 +302,68 @@ Medición en simulación del número de ciclos entre valles consecutivos para ca
 
 #### Objetivo
 
-Convertir la referencia de modulación `duty_ref` en las señales ideales de conmutación de cada pierna, `s_a` y `s_b`, según la modulación PWM unipolar.
+Convertir `duty_ref` en las señales de conmutación de cada pierna, `s_a` y `s_b`.
 
-#### Entradas
+#### Entradas y salidas
 
-| Señal | Ancho | Dirección | Descripción |
-|---|---:|---|---|
-| `c` | 14 bits | Entrada | Portadora. |
-| `duty_sh` | 16 bits | Entrada | `duty_ref` (Q1.15 con signo) del registro sombra. |
-| `N_sh` | 14 bits | Entrada | Pico de la portadora activa. |
-
-#### Salidas
-
-| Señal | Ancho | Dirección | Descripción |
-|---|---:|---|---|
-| `s_a` | 1 bit | Salida | 1 = conduce el transistor superior de la pierna A (antes del tiempo muerto). |
-| `s_b` | 1 bit | Salida | 1 = conduce el transistor superior de la pierna B (antes del tiempo muerto). |
+| Señal | Dirección | Descripción |
+|---|---|---|
+| `c` | Entrada | Portadora. |
+| `duty_ref` | Entrada | Referencia de modulación (registro sombra). |
+| `N` | Entrada | Valor máximo de la portadora. |
+| `s_a`, `s_b` | Salida | 1 = conduce el transistor superior de esa pierna. |
 
 ![Diagrama de cuarto nivel — Comparador unipolar](figuras/cuarto_nivel_comparador.png)
 
-#### Relación con los demás módulos
-
-**Generador de portadora (`c`) + registros sombra (`duty_sh`, `N_sh`) → comparador → `s_a`, `s_b` → generadores de tiempo muerto**
-
 #### Funcionamiento
 
-`duty_ref` representa el índice de modulación instantáneo $m$ en **Q1.15 con signo**:
+`duty_ref` es un número de 16 bits con signo en formato Q1.15, que representa el índice de modulación $m$ entre −1 y 1:
 
 $$
-m = \frac{duty\_ref}{2^{15}}, \qquad m \in [-1,\ 1)
+m = \frac{duty\_ref}{2^{15}}
 $$
 
-En PWM unipolar, la pierna A se compara con $+m$ y la pierna B con $-m$ contra la misma portadora. Con la portadora en $[0, N]$, los umbrales son:
+En la modulación unipolar, la pierna A se compara con $+m$ y la pierna B con $-m$. Como nuestra portadora va de 0 a N, cada referencia se pasa a un umbral en esa misma escala:
 
 $$
-th_A = \frac{N\,(2^{15} + duty\_ref)}{2^{16}}, \qquad th_B = \frac{N\,(2^{15} - duty\_ref)}{2^{16}}
+th_A = \frac{N(1+m)}{2}, \qquad th_B = \frac{N(1-m)}{2}
 $$
 
 $$
 s_A = (c < th_A), \qquad s_B = (c < th_B)
 $$
 
-Los ciclos de trabajo resultantes y la tensión promedio aplicada a la carga son:
+Con esto la pierna A conduce una fracción $(1+m)/2$ del período y la pierna B una fracción $(1-m)/2$. El voltaje promedio en la carga queda:
 
 $$
-d_A = \frac{1+m}{2}, \qquad d_B = \frac{1-m}{2}, \qquad \bar{v}_{AB} = (d_A - d_B)\,V_{dc} = m\,V_{dc}
+\bar{v}_{AB} = m\,V_{dc}
 $$
 
-| `duty_ref` | $m$ | $d_A$ | $d_B$ | $\bar{v}_{AB}$ |
-|---|---:|---:|---:|---:|
-| `0x7999` | +0,95 | 97,5 % | 2,5 % | +0,95 $V_{dc}$ |
-| `0x4000` | +0,5 | 75 % | 25 % | +0,5 $V_{dc}$ |
-| `0x0000` | 0 | 50 % | 50 % | 0 |
-| `0xC000` | −0,5 | 25 % | 75 % | −0,5 $V_{dc}$ |
-| `0x8667` | −0,95 | 2,5 % | 97,5 % | −0,95 $V_{dc}$ |
-
-Ejemplo a 20 kHz ($N = 2500$) con $m = 0{,}5$: $th_A = 1875$ y $th_B = 625$.
+Por ejemplo, a 20 kHz (N = 2500) con $m = 0{,}5$, los umbrales son $th_A = 1875$ y $th_B = 625$: la pierna A conduce el 75 % del período, la B el 25 %, y en la carga queda $0{,}5\,V_{dc}$.
 
 #### Diseño y justificación técnica
 
-- **Q1.15 con signo:** la referencia de la modulación unipolar es bipolar (sinusoidal), así que el software escribe directamente la salida normalizada del PR, con la mayor resolución posible en 16 bits.
-- **Relación lineal $\bar{v}_{AB} = m V_{dc}$:** simplifica el diseño del PR en PEDP, porque el modulador se modela como una ganancia $V_{dc}$.
-- **Umbrales recalculados solo en el valle:** la multiplicación (1–2 DSP48) queda fuera del camino crítico del comparador y puede segmentarse.
-- **Límite $|m| \leq$ `DUTY_MAX`:** el pulso más angosto dura $\frac{1-|m|}{2} T_{sw}$. Si es menor que el tiempo muerto, el generador de tiempo muerto lo elimina y se pierde linealidad. La condición de operación lineal es:
+Escogimos Q1.15 porque la referencia que sale del PR es una senoidal con valores positivos y negativos, y este formato la representa directamente con la máxima resolución que permiten 16 bits. Además, como la relación entre `duty_ref` y el voltaje es lineal, para el diseño del PR el modulador es solo una ganancia de $V_{dc}$.
+
+`duty_ref` se limita a ±0,95 (`DUTY_MAX` = `0x7999`). Si $m$ se acerca a 1, una de las piernas queda con pulsos tan cortos que el tiempo muerto se los come, y el voltaje deja de seguir a la referencia. Para que eso no pase, el pulso más corto tiene que durar más que el tiempo muerto:
 
 $$
 |m| \leq 1 - 2\, t_{dt}\, f_{sw}
 $$
 
-Con $t_{dt} = 1\ \mu s$ y $f_{sw} = 20$ kHz: $|m| \leq 0{,}96$, por lo que `DUTY_MAX` ≈ 0,95 deja margen.
+Con 1 µs de tiempo muerto a 20 kHz, esto da $|m| \leq 0{,}96$, así que 0,95 deja un poco de margen.
 
 #### Comportamiento durante el reset
 
-$duty\_sh = 0$ ($m = 0$). Como el generador no está en `RUN`, las compuertas permanecen apagadas.
+`duty_ref` = 0, que corresponde a $m = 0$. Como el generador está detenido, las compuertas están apagadas.
 
 #### Casos especiales y condiciones de borde
 
-- **$m = 0$:** ambas piernas al 50 % en fase, con $v_{AB} = 0$ en todo el período (vector cero).
-- **$|m|$ cerca de `DUTY_MAX`:** el pulso de una pierna puede quedar más corto que el tiempo muerto. Se elimina sin riesgo de shoot-through (ver 7.4).
+Con $m = 0$ las dos piernas conmutan iguales, al 50 %, y el voltaje en la carga es 0 todo el tiempo.
 
 #### Estrategia de validación
 
-Modelo de referencia en el testbench que calcula $th_A$, $th_B$ y los anchos de pulso esperados. Para $m \in \{-0{,}95, -0{,}5, 0, 0{,}5, 0{,}95\}$ se comprueba que el ancho medido coincide (±1 ciclo) y que $d_A + d_B = 1$. Pruebas T11 y T14.
+El testbench calcula el ancho de pulso esperado para varios valores de $m$ (−0,95, −0,5, 0, 0,5 y 0,95) y lo compara con el medido, aceptando una diferencia de un ciclo.
 
 ---
 
@@ -492,23 +371,16 @@ Modelo de referencia en el testbench que calcula $th_A$, $th_B$ y los anchos de 
 
 #### Objetivo
 
-Generar, para cada pierna, el par de señales complementarias `gate_h`/`gate_l` a partir de la señal ideal `s`, insertando un intervalo de `dead_time` ciclos en el que ambos transistores permanecen apagados, para evitar el cortocircuito de la pierna (shoot-through).
+Producir las dos compuertas complementarias de cada pierna, asegurando que nunca estén encendidas a la vez. Hay una instancia por pierna.
 
-#### Entradas
+#### Entradas y salidas
 
-| Señal | Ancho | Dirección | Descripción |
-|---|---:|---|---|
-| `clk`, `rst_n` | 1 bit | Entrada | Reloj y reset. |
-| `s` | 1 bit | Entrada | `s_a` o `s_b`, desde el comparador. |
-| `dt_sh` | 10 bits | Entrada | Tiempo muerto en ciclos (registro sombra). |
-| `running` | 1 bit | Entrada | Si es 0, fuerza el estado `OFF`. |
-
-#### Salidas
-
-| Señal | Ancho | Dirección | Descripción |
-|---|---:|---|---|
-| `gate_h` | 1 bit | Salida | Compuerta del transistor superior (registrada). |
-| `gate_l` | 1 bit | Salida | Compuerta del transistor inferior (registrada). |
+| Señal | Dirección | Descripción |
+|---|---|---|
+| `s` | Entrada | `s_a` o `s_b`, desde el comparador. |
+| `dead_time` | Entrada | Tiempo muerto en ciclos de reloj. |
+| `running` | Entrada | Si es 0, las compuertas se apagan. |
+| `gate_h`, `gate_l` | Salida | Compuertas del transistor superior e inferior. |
 
 <!-- Reemplazar por figuras/cuarto_nivel_tiempo_muerto.png -->
 ```mermaid
@@ -518,10 +390,10 @@ stateDiagram-v2
     OFF --> DT_TO_LOW: running ∧ s = 0
     DT_TO_HIGH --> HIGH_ON: cnt = dead_time
     DT_TO_HIGH --> DT_TO_LOW: s = 0
-    HIGH_ON --> DT_TO_LOW: s = 0 / cnt := 0
+    HIGH_ON --> DT_TO_LOW: s = 0
     DT_TO_LOW --> LOW_ON: cnt = dead_time
     DT_TO_LOW --> DT_TO_HIGH: s = 1
-    LOW_ON --> DT_TO_HIGH: s = 1 / cnt := 0
+    LOW_ON --> DT_TO_HIGH: s = 1
     HIGH_ON --> OFF: ¬running
     LOW_ON --> OFF: ¬running
     DT_TO_HIGH --> OFF: ¬running
@@ -530,24 +402,13 @@ stateDiagram-v2
 
 | Estado | `gate_h` | `gate_l` |
 |---|:---:|:---:|
-| `OFF` | 0 | 0 |
-| `DT_TO_HIGH`, `DT_TO_LOW` | 0 | 0 |
+| `OFF`, `DT_TO_HIGH`, `DT_TO_LOW` | 0 | 0 |
 | `HIGH_ON` | 1 | 0 |
 | `LOW_ON` | 0 | 1 |
 
-#### Relación con los demás módulos
-
-**Comparador (`s_a`) → tiempo muerto A → `gate_ah_o`, `gate_al_o` → driver de la pierna A**
-
-**Comparador (`s_b`) → tiempo muerto B → `gate_bh_o`, `gate_bl_o` → driver de la pierna B**
-
 #### Funcionamiento
 
-En cada flanco de `s`, la FSM apaga primero el transistor que conducía y pasa a un estado de tiempo muerto. Allí un contador `cnt` cuenta `dead_time` ciclos con ambas compuertas en 0. Al terminar, enciende el transistor complementario:
-
-$$
-t_{dt} = dead\_time \times 10\ \text{ns}, \qquad dead\_time \in [20,\ 1023] \Rightarrow t_{dt} \in [0{,}2\ \mu s,\ 10{,}23\ \mu s]
-$$
+Cada vez que `s` cambia, la máquina apaga el transistor que estaba conduciendo y pasa a un estado de espera en el que ambas compuertas están en 0. Ahí un contador cuenta `dead_time` ciclos, y cuando termina, enciende el transistor complementario.
 
 ```
 s       ________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|_____________
@@ -556,28 +417,31 @@ gate_l  ‾‾‾‾‾‾‾‾|_______________________|‾‾‾‾‾‾‾�
                 |<-t_dt->|              |<-t_dt->|
 ```
 
+Cada ciclo de reloj son 10 ns, así que el tiempo muerto es:
+
+$$
+t_{dt} = dead\_time \times 10\ \text{ns}
+$$
+
+con `dead_time` entre 20 y 1023 ciclos, es decir, de 0,2 µs a 10,23 µs.
+
 #### Diseño y justificación técnica
 
-- **FSM explícita en lugar de un retardo por flanco:** garantiza por construcción que nunca coinciden `gate_h = 1` y `gate_l = 1`, incluso con pulsos de `s` más cortos que el tiempo muerto.
-- **Salidas registradas:** las compuertas salen directamente de flip-flops, sin glitches combinacionales hacia los drivers.
-- **Tiempo muerto configurable por registro:** permite ajustarlo desde software durante las pruebas con la etapa desenergizada, sin resintetizar. El valor final depende de los MOSFET y drivers elegidos por PEDP.
-- **Saturación con `DT_MIN`:** impide que el software deje la pierna sin tiempo muerto por error.
+Lo hicimos con una máquina de estados porque así es imposible, por cómo está construida, que las dos compuertas de una pierna estén en 1 al mismo tiempo. Si eso pasara, la pierna quedaría en cortocircuito con la fuente. Las salidas salen directamente de flip-flops para que no lleguen glitches a los drivers.
+
+El tiempo muerto es configurable desde software porque el valor final depende de los MOSFET y drivers que elija el equipo de potencia. Así se puede ajustar en las pruebas sin volver a sintetizar. El mínimo de 20 ciclos evita que por un error del software quede en cero.
 
 #### Comportamiento durante el reset
 
-$$
-rst\_n = 0 \Rightarrow \text{estado} = \text{OFF},\ gate\_h = 0,\ gate\_l = 0,\ cnt = 0
-$$
+La máquina queda en `OFF`, con las dos compuertas en 0.
 
 #### Casos especiales y condiciones de borde
 
-- **Pulso de `s` más corto que $t_{dt}$:** la FSM pasa de un estado de tiempo muerto al otro sin encender ningún transistor. El pulso se pierde, pero sin shoot-through.
-- **`running` cae a 0 en cualquier estado:** paso inmediato a `OFF`.
-- **Cambio de `dead_time`:** se aplica en el valle (registro sombra), nunca a mitad de un intervalo de tiempo muerto.
+Si `s` cambia otra vez antes de que termine el tiempo muerto, la máquina pasa directo al otro estado de espera sin encender ningún transistor. Ese pulso se pierde, pero nunca hay cortocircuito. Si `running` cae a 0, se va a `OFF` desde cualquier estado.
 
 #### Estrategia de validación
 
-Aserciones SVA activas durante toda la simulación: `!(gate_ah_o && gate_al_o)`, `!(gate_bh_o && gate_bl_o)`, y que tras cada flanco de bajada de una compuerta la complementaria permanezca en 0 al menos `dead_time` ciclos. Además, se mide el intervalo muerto para `dead_time` ∈ {20, 100, 500}. Pruebas T12 y T13. En placa se mide con osciloscopio con la etapa de potencia desenergizada.
+Durante toda la simulación, el testbench revisa en cada ciclo que nunca estén `gate_h` y `gate_l` en 1 a la vez, y mide el intervalo muerto para varios valores de `dead_time`. En la placa se mide con el osciloscopio, con la etapa de potencia apagada.
 
 ---
 
@@ -585,59 +449,40 @@ Aserciones SVA activas durante toda la simulación: `!(gate_ah_o && gate_al_o)`,
 
 #### Objetivo
 
-Generar la señal de sincronización que indica a la interfaz ADC/XADC el instante de muestreo de la corriente dentro del período de conmutación.
+Avisarle al ADC cuándo tomar la muestra de corriente.
 
-#### Entradas
+#### Entradas y salidas
 
-| Señal | Ancho | Dirección | Descripción |
-|---|---:|---|---|
-| `clk`, `rst_n` | 1 bit | Entrada | Reloj y reset. |
-| `valley` | 1 bit | Entrada | Pulso de inicio de período, desde el generador de portadora. |
-
-#### Salidas
-
-| Señal | Ancho | Dirección | Descripción |
-|---|---:|---|---|
-| `pwm_trigger_o` | 1 bit | Salida | Pulso de `TRIG_WIDTH` ciclos en el valle de la portadora. |
+| Señal | Dirección | Descripción |
+|---|---|---|
+| `valley` | Entrada | Pulso de inicio de período, desde la portadora. |
+| `pwm_trigger_o` | Salida | Pulso de 4 ciclos (40 ns) hacia el ADC. |
 
 ![Diagrama de cuarto nivel — Generador de trigger](figuras/cuarto_nivel_trigger.png)
 
-#### Relación con los demás módulos
-
-**Generador de portadora (`valley`) → generador de trigger → `pwm_trigger_o` → interfaz ADC/XADC (inicio de conversión)**
-
 #### Funcionamiento
 
-Un contador de ancho de pulso se carga con `TRIG_WIDTH` cuando llega `valley` y mantiene la salida en 1 mientras es distinto de cero:
-
-$$
-pwm\_trigger\_o = 1 \iff \text{han pasado menos de TRIG\_WIDTH ciclos desde el último } valley
-$$
-
-Se produce un pulso por período de conmutación, es decir, a frecuencia $f_{sw}$.
+Cuando llega `valley`, un contador pequeño mantiene `pwm_trigger_o` en 1 durante 4 ciclos de reloj. Se genera un pulso por cada período de conmutación.
 
 #### Diseño y justificación técnica
 
-- **Muestreo en el valle:** con PWM centrado, en el valle ambas piernas están en el mismo estado (vector cero, $v_{AB} = 0$) y la corriente pasa por el punto medio de su rizado. La muestra coincide con el valor promedio de la corriente en el período, sin aliasing del rizado de conmutación. Además, lejos de la saturación no hay flancos de conmutación cerca del valle, así que la muestra no se contamina con ruido.
-- **Pulso de varios ciclos:** la entrada de inicio de conversión del XADC se detecta con más seguridad que con un pulso de un solo ciclo. El ancho final se acordará con la interfaz ADC.
-- **Misma referencia que los registros sombra:** la muestra $k$ se toma en el valle $k$, la ISR calcula el PR y escribe `duty_ref`, y el nuevo valor se aplica en el valle $k+1$. La latencia de actuación queda acotada a un período de conmutación.
+Elegimos muestrear en el valle porque ahí las dos piernas están en el mismo estado y la corriente pasa justo por la mitad de su rizado. Así la muestra corresponde al valor promedio de la corriente en ese período. Además, en el valle no hay conmutaciones cerca, entonces la medición tiene menos ruido.
+
+Los registros sombra también se actualizan en el valle. La secuencia queda así: se toma la muestra, la rutina de interrupción calcula el PR y escribe el nuevo `duty_ref`, y ese valor se aplica en el siguiente valle. El retardo entre medir y actuar nunca pasa de un período de conmutación.
+
+El pulso dura 4 ciclos en vez de 1 para que el ADC lo detecte sin problemas. El ancho final se ajustará con la interfaz del ADC.
 
 #### Comportamiento durante el reset
 
-$$
-rst\_n = 0 \Rightarrow pwm\_trigger\_o = 0
-$$
+`pwm_trigger_o` = 0.
 
 #### Casos especiales y condiciones de borde
 
-- Con `running = 0` no hay valles, así que no se generan pulsos.
-- Cambio de frecuencia: el trigger sigue al nuevo período a partir del valle en que se aplica.
+Si el PWM está deshabilitado no hay valles, entonces tampoco hay pulsos de trigger.
 
 #### Estrategia de validación
 
-Verificar en simulación un pulso por período, de exactamente `TRIG_WIDTH` ciclos, alineado con `c = 0`, y la ausencia de pulsos con `running = 0` (prueba T15). En placa se observa `pwm_trigger_o` junto a una compuerta en el osciloscopio.
-
----
+En simulación se verifica que haya un pulso por período, de 4 ciclos y alineado con `c = 0`. En la placa se observa junto con una compuerta en el osciloscopio.
 
 ### 7.6 en adelante: subbloques de la interfaz ADC/XADC
 
@@ -657,32 +502,32 @@ Verificar en simulación un pulso por período, de exactamente `TRIG_WIDTH` cicl
 
 ### 8.2 Registros del periférico PWM
 
-Los offsets son relativos a la dirección base del PWM Controller. Los registros 0x00 y 0x04 respetan exactamente la definición del enunciado (sección 4.2.3). El 0x08 es una extensión del equipo.
+Los offsets son relativos a la dirección base que asigne Vivado. Los registros 0x00 y 0x04 son los que define el enunciado. El 0x08 lo agregamos para el tiempo muerto.
 
-**0x00 — CTRL_STATUS** · reset `0x0000_0000`
+**0x00 — CTRL_STATUS** (reset `0x0000_0000`)
 
-| Bits | Campo | Acceso | Reset | Descripción |
-|---|---|---|---|---|
-| 0 | `enable` | R/W | 0 | 1 = habilita la generación PWM. 0 = apaga las cuatro compuertas de inmediato. |
-| 2:1 | `freq_sel` | R/W | `00` | `00` = 5 kHz, `01` = 10 kHz, `10` = 20 kHz, `11` = 40 kHz. Se aplica en el siguiente valle. |
-| 3 | `running` | RO | 0 | 1 = el generador está conmutando. Se ignoran escrituras. |
-| 31:4 | — | Reservado | 0 | Se leen como 0. Se ignoran escrituras. |
+| Bits | Campo | Acceso | Descripción |
+|---|---|---|---|
+| 0 | `enable` | R/W | 1 habilita el PWM. 0 apaga las cuatro compuertas. |
+| 2:1 | `freq_sel` | R/W | `00` = 5 kHz, `01` = 10 kHz, `10` = 20 kHz, `11` = 40 kHz. |
+| 3 | `running` | Solo lectura | 1 si el generador está activo. |
+| 31:4 | — | Reservado | Se leen como 0. |
 
-**0x04 — DUTY_REF** · reset `0x0000_0000`
+**0x04 — DUTY_REF** (reset `0x0000_0000`)
 
-| Bits | Campo | Acceso | Reset | Descripción |
-|---|---|---|---|---|
-| 15:0 | `duty_ref` | R/W | `0x0000` | Índice de modulación en Q1.15 con signo. Se satura a ±`DUTY_MAX` al escribirse y se lee el valor saturado. Se aplica en el siguiente valle. |
-| 31:16 | — | Reservado | 0 | Se leen como 0. Se ignoran escrituras. |
+| Bits | Campo | Acceso | Descripción |
+|---|---|---|---|
+| 15:0 | `duty_ref` | R/W | Índice de modulación en Q1.15 con signo. Se satura a ±0,95 (`0x7999` / `0x8667`). |
+| 31:16 | — | Reservado | Se leen como 0. |
 
-**0x08 — DEADTIME** · reset `0x0000_0064`
+**0x08 — DEADTIME** (reset `0x0000_0064`)
 
-| Bits | Campo | Acceso | Reset | Descripción |
-|---|---|---|---|---|
-| 9:0 | `dead_time` | R/W | 100 | Tiempo muerto en ciclos de 10 ns. Se satura a [20, 1023]. Se aplica en el siguiente valle. |
-| 31:10 | — | Reservado | 0 | Se leen como 0. Se ignoran escrituras. |
+| Bits | Campo | Acceso | Descripción |
+|---|---|---|---|
+| 9:0 | `dead_time` | R/W | Tiempo muerto en ciclos de 10 ns. Se satura entre 20 y 1023. |
+| 31:10 | — | Reservado | Se leen como 0. |
 
-**0x0C** — No implementado. Se lee como 0 y se ignoran escrituras.
+Los cambios en `freq_sel`, `duty_ref` y `dead_time` se aplican en el siguiente valle de la portadora.
 
 ### 8.3 Registros de la interfaz ADC/XADC
 
@@ -720,26 +565,19 @@ Los offsets son relativos a la dirección base del PWM Controller. Los registros
 
 | Tema | Propuesta actual | Responsable / con quién se acuerda | Estado |
 |---|---|---|---|
-| Frecuencias de conmutación (`N_TABLE`) | 5 / 10 / 20 / 40 kHz | Keylor – PEDP | Pendiente |
-| Tiempo muerto inicial | 1 µs, ajustable de 0,2 a 10,23 µs | Keylor – PEDP (según MOSFET y drivers) | Pendiente |
-| Polaridad de las compuertas y niveles lógicos | Activo alto, 3,3 V (`GATE_ACTIVE_HIGH`) | Keylor / Marvin – PEDP | Pendiente |
+| Frecuencia de conmutación | 5 / 10 / 20 / 40 kHz | Keylor – PEDP | Pendiente |
+| Tiempo muerto | 1 µs inicial, ajustable de 0,2 a 10,23 µs | Keylor – PEDP | Pendiente |
+| Nivel lógico y polaridad de las compuertas | 3,3 V, activo en alto | Keylor – PEDP | Pendiente |
 | Formato de `duty_ref` | Q1.15 con signo, saturado a ±0,95 | Keylor – Luis Diego | Pendiente |
-| Instante y ancho de `pwm_trigger_o` | Valle de la portadora, 4 ciclos | Keylor – Luis Diego | Pendiente |
-| Señal de falla `fault_i` | Opcional, apaga las compuertas | Keylor – PEDP | Pendiente |
+| Instante del trigger del ADC | Valle de la portadora, pulso de 4 ciclos | Keylor – Luis Diego | Pendiente |
+| | | | |
 
 ---
 
 ## 11. Decisiones de diseño y justificación
 
 - **Arquitectura del sistema:** *(Redactar — Marvin)*
-- **Periférico PWM:**
-  - Un solo dominio de reloj (100 MHz) para todo el periférico: evita cruces de dominio y simplifica la verificación y el cierre de timing.
-  - Portadora triangular (PWM centrado): flancos simétricos y un instante de muestreo natural en el valle, que entrega la corriente promedio del período.
-  - `duty_ref` en Q1.15 con signo: representa directamente la referencia bipolar de la modulación unipolar, con relación lineal $\bar{v}_{AB} = m V_{dc}$.
-  - Saturación en la escritura con lectura del valor saturado: cumple el requisito del enunciado y permite al software detectar la saturación.
-  - Registros sombra cargados en el valle: cambios sin glitches ni períodos truncados, con latencia acotada a un período.
-  - Apagado inmediato al deshabilitar o ante falla: prioriza la seguridad del puente H.
-  - Registro adicional DEADTIME (0x08): cumple el requisito de tiempo muerto configurable sin modificar los registros 0x00 y 0x04 definidos en el enunciado.
+- **Periférico PWM:** todo el periférico trabaja con el mismo reloj de 100 MHz del procesador, lo que simplifica el diseño y el timing. Se usó una portadora triangular para tener pulsos centrados y un buen punto de muestreo en el valle. `duty_ref` va en Q1.15 porque la referencia del PR es senoidal (positiva y negativa) y así el voltaje promedio queda lineal con el valor escrito. Los cambios se aplican en el valle mediante registros sombra para no cortar pulsos, y al deshabilitar se apagan las compuertas de inmediato por seguridad. Se agregó el registro DEADTIME porque el enunciado pide tiempo muerto configurable y los dos registros sugeridos no tienen un campo para eso.
 - **Adquisición:** *(Redactar — Luis Diego)*
 - **Software:** *(Redactar — Luis Diego)*
 
@@ -751,28 +589,21 @@ Los offsets son relativos a la dirección base del PWM Controller. Los registros
 
 *(Completar — cada uno agrega las pruebas de su bloque.)*
 
-**Periférico PWM — testbench autoverificable** (`tb/pwm_controller/tb_pwm_controller.sv`): tareas BFM AXI4-Lite, modelo de referencia, monitores de ancho de pulso, período y tiempo muerto, y aserciones SVA. Cada prueba imprime `PASS`/`FAIL` con el valor esperado y el obtenido, y al final se muestra un resumen. La simulación termina con error si hay algún fallo, así que la corrección no depende de inspeccionar formas de onda.
+**Periférico PWM.** El testbench (`tb/pwm_controller/`) escribe y lee los registros por AXI4-Lite, mide los pulsos generados y los compara con los valores esperados. Cada prueba imprime PASS o FAIL, y al final se muestra un resumen, para no depender de revisar las formas de onda a mano.
 
 | # | Prueba | Resultado esperado |
 |---|---|---|
-| T1 | Valores de reset | CTRL = 0, DUTY = 0, DEADTIME = 100. Compuertas y trigger en 0. |
-| T2 | Lectura/escritura de registros | Lo leído coincide con lo escrito. Los bits reservados se leen como 0. |
-| T3 | Bit `running` de solo lectura | Escribir 1 en el bit 3 no lo modifica. |
-| T4 | `WSTRB` parcial | Solo cambian los bytes habilitados. |
-| T5 | Orden AW/W y backpressure | Escritura correcta en todos los órdenes y con `BREADY`/`RREADY` retrasados. |
-| T6 | Dirección no mapeada | `OKAY`, lectura 0, ningún registro se modifica. |
-| T7 | Saturación de `duty_ref` | `0x7FFF`, `0x8000` y `0x8001` se leen como ±`DUTY_MAX`. Los valores dentro del rango no cambian. |
-| T8 | Saturación de `dead_time` | 0 → 20 y 2000 → 1023. |
-| T9 | Frecuencias de conmutación | El período medido es exactamente 2N ciclos para cada `freq_sel`. |
-| T10 | Cambio de frecuencia en caliente | El cambio ocurre en un valle, sin períodos intermedios. |
-| T11 | Modulación unipolar | Anchos de pulso de A y B según el modelo (±1 ciclo) para cinco valores de $m$. |
-| T12 | Tiempo muerto | El intervalo con ambas compuertas apagadas es exactamente `dead_time` ciclos en cada transición. |
-| T13 | Pulsos menores que el tiempo muerto | Sin shoot-through ni salidas inestables. |
-| T14 | Actualización en el valle | `duty_ref` escrito a mitad de período se aplica en el siguiente valle. |
-| T15 | `pwm_trigger_o` | Un pulso de `TRIG_WIDTH` ciclos por período, alineado con `c = 0`. Ninguno con `running = 0`. |
-| T16 | `enable` y `fault_i` | Compuertas apagadas en ≤ 1 ciclo y `running = 0`. Al reactivar, el generador arranca en el valle. |
+| T1 | Reset | Registros en su valor inicial y compuertas apagadas. |
+| T2 | Escritura y lectura de registros | Lo leído coincide con lo escrito. `running` no se puede escribir. |
+| T3 | Saturación | `duty_ref` fuera de rango se lee como ±0,95. `dead_time` se limita entre 20 y 1023. |
+| T4 | Frecuencias | El período medido es 2N ciclos para cada `freq_sel`. |
+| T5 | Cambio de frecuencia en funcionamiento | El cambio ocurre en el valle, sin períodos raros. |
+| T6 | Modulación unipolar | Los anchos de pulso de A y B coinciden con los esperados para varios valores de $m$. |
+| T7 | Tiempo muerto | Las compuertas de una pierna nunca están en 1 al mismo tiempo, y el intervalo muerto dura lo configurado. |
+| T8 | Trigger | Un pulso por período, alineado con el valle. Ninguno si el PWM está deshabilitado. |
+| T9 | Enable | Al deshabilitar, las compuertas se apagan de inmediato y `running` pasa a 0. |
 
-Además, se ejecuta el mismo testbench sobre la netlist post-implementación con retardos (simulación post-implementación temporizada), y se verifica slack positivo a 100 MHz.
+La misma simulación se corre después sobre el diseño ya implementado (simulación post-implementación temporizada).
 
 **Resto del sistema:**
 
@@ -793,9 +624,8 @@ Además, se ejecuta el mismo testbench sobre la netlist post-implementación con
 
 | Riesgo | Mitigación |
 |---|---|
-| Shoot-through en el puente H por error del PWM | FSM de tiempo muerto con aserciones SVA, `DT_MIN` y pruebas con la etapa desenergizada antes de energizar. |
-| Frecuencia o tiempo muerto definitivos de PEDP llegan tarde | Parámetros `N_TABLE` y registro DEADTIME: se ajustan sin rediseñar. |
-| Muestreo contaminado por el ruido de conmutación | Muestreo en el valle, lejos de los flancos. |
+| Cortocircuito en una pierna del puente H por un error en el PWM | Máquina de estados de tiempo muerto, revisión en simulación y medición con osciloscopio con la potencia apagada antes de energizar. |
+| El equipo de potencia define tarde la frecuencia o el tiempo muerto | Ambos se pueden cambiar sin rediseñar: la frecuencia es un parámetro y el tiempo muerto un registro. |
 | | |
 
 ---
@@ -805,7 +635,7 @@ Además, se ejecuta el mismo testbench sobre la netlist post-implementación con
 | Persona | Área principal | Issues |
 |---|---|---|
 | Marvin | *(Completar)* | |
-| Keylor | Periférico PWM personalizado: RTL, interfaz AXI4-Lite, testbench autoverificable, verificación y documentación | #2, #5, #8, #11, #14, #17 |
+| Keylor | Periférico PWM: diseño en SystemVerilog, interfaz AXI4-Lite, testbench y documentación | #2, #5, #8, #11, #14, #17 |
 | Luis Diego | *(Completar)* | |
 | Todos | Integración y revisión cruzada de pull requests | — |
 
