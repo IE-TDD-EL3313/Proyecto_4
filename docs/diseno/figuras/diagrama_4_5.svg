@@ -1,0 +1,44 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="850" viewBox="0 0 1800 850"><rect x="0" y="0" width="1800" height="850" fill="white" /><style>
+    .bloque {
+        fill: white;
+        stroke: black;
+        stroke-width: 2;
+    }
+
+    .linea {
+        fill: none;
+        stroke: black;
+        stroke-width: 1.8;
+        stroke-linejoin: miter;
+    }
+
+    .texto {
+        font-family: Arial, sans-serif;
+        font-size: 17px;
+        fill: black;
+        text-anchor: middle;
+    }
+
+    .etiqueta {
+        font-family: Arial, sans-serif;
+        font-size: 15px;
+        fill: black;
+        text-anchor: middle;
+    }
+
+    .titulo {
+        font-family: Arial, sans-serif;
+        font-size: 24px;
+        font-weight: bold;
+        fill: black;
+        text-anchor: middle;
+    }
+
+    .nota {
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+        fill: black;
+        text-anchor: middle;
+    }
+</style><defs><marker id="flecha" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 1 L 9 5 L 0 9 Z" fill="black" /></marker></defs><text x="900.0" y="48" class="titulo">ADQUISICIÓN DE CORRIENTE MEDIANTE XADC</text><rect x="225" y="220" width="230" height="95" class="bloque" /><text x="340.0" y="262.0" class="texto">Acondicionamiento</text><text x="340.0" y="285.0" class="texto">analógico</text><rect x="565" y="220" width="240" height="95" class="bloque" /><text x="685.0" y="262.0" class="texto">Conversión A/D</text><text x="685.0" y="285.0" class="texto">XADC</text><rect x="565" y="440" width="240" height="95" class="bloque" /><text x="685.0" y="482.0" class="texto">Control de</text><text x="685.0" y="505.0" class="texto">adquisición</text><rect x="1000" y="125" width="230" height="90" class="bloque" /><text x="1115.0" y="164.5" class="texto">Registro de</text><text x="1115.0" y="187.5" class="texto">muestra</text><rect x="1000" y="390" width="230" height="90" class="bloque" /><text x="1115.0" y="429.5" class="texto">Registro de</text><text x="1115.0" y="452.5" class="texto">estado</text><rect x="1400" y="270" width="200" height="105" class="bloque" /><text x="1500.0" y="317.0" class="texto">Interfaz</text><text x="1500.0" y="340.0" class="texto">AXI4-Lite</text><path d="M 130 267 L 225 267" class="linea" marker-end="url(#flecha)" /><text x="175" y="252" class="etiqueta">i_sense</text><path d="M 455 267 L 565 267" class="linea" marker-end="url(#flecha)" /><text x="510" y="252" class="etiqueta">v_adc</text><path d="M 405 487 L 565 487" class="linea" marker-end="url(#flecha)" /><text x="485" y="473" class="etiqueta">pwm_trigger_o</text><path d="M 685 440 L 685 315" class="linea" marker-end="url(#flecha)" /><text x="765" y="405" class="etiqueta">inicio de conversión</text><path d="M 805 250 L 925 250 L 925 170 L 1000 170" class="linea" marker-end="url(#flecha)" /><text x="975" y="235" class="etiqueta">adc_data</text><path d="M 805 285 L 870 285 L 870 435 L 1000 435" class="linea" marker-end="url(#flecha)" /><text x="960" y="420" class="etiqueta">data_valid</text><path d="M 870 285 L 870 100 L 1120 100 L 1120 125" class="linea" marker-end="url(#flecha)" /><text x="1010" y="87" class="etiqueta">sample_we</text><path d="M 1230 170 L 1355 170 L 1355 300 L 1400 300" class="linea" marker-end="url(#flecha)" /><text x="1290" y="155" class="etiqueta">sample_data</text><path d="M 1230 435 L 1355 435 L 1355 345 L 1400 345" class="linea" marker-end="url(#flecha)" /><text x="1290" y="420" class="etiqueta">sample_valid</text><path d="M 1600 322 L 1680 322" class="linea" marker-end="url(#flecha)" /><text x="1640" y="305" class="etiqueta">AXI4-Lite</text></svg>
