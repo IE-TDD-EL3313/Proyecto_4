@@ -1,0 +1,37 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1550" height="790" viewBox="0 0 1550 790"><rect x="0" y="0" width="1550" height="790" fill="white" /><style>
+.bloque {
+    fill: white;
+    stroke: black;
+    stroke-width: 2;
+}
+
+.linea {
+    fill: none;
+    stroke: black;
+    stroke-width: 2;
+    stroke-linejoin: miter;
+}
+
+.texto {
+    font-family: Arial, sans-serif;
+    font-size: 18px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.etiqueta {
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.titulo {
+    font-family: Arial, sans-serif;
+    font-size: 24px;
+    font-weight: bold;
+    fill: black;
+    text-anchor: middle;
+}
+</style><defs><marker id="flecha" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 1 L 9 5 L 0 9 Z" fill="black" /></marker></defs><text x="775.0" y="45" class="titulo">INTEGRACIÓN DEL PUENTE H, CARGA RL Y REALIMENTACIÓN</text><rect x="80" y="205" width="220" height="95" class="bloque" /><text x="190.0" y="246.5" class="texto">Controlador PWM</text><text x="190.0" y="270.5" class="texto">unipolar</text><rect x="400" y="205" width="220" height="95" class="bloque" /><text x="510.0" y="246.5" class="texto">Drivers de</text><text x="510.0" y="270.5" class="texto">compuerta</text><rect x="720" y="205" width="220" height="95" class="bloque" /><text x="830.0" y="258.5" class="texto">Puente H</text><rect x="1040" y="205" width="220" height="95" class="bloque" /><text x="1150.0" y="258.5" class="texto">Carga RL</text><rect x="720" y="75" width="220" height="85" class="bloque" /><text x="830.0" y="123.5" class="texto">Fuente DC</text><rect x="1040" y="390" width="220" height="95" class="bloque" /><text x="1150.0" y="431.5" class="texto">Sensor de</text><text x="1150.0" y="455.5" class="texto">corriente</text><rect x="720" y="390" width="220" height="95" class="bloque" /><text x="830.0" y="431.5" class="texto">Acondicionamiento</text><text x="830.0" y="455.5" class="texto">analógico</text><rect x="400" y="390" width="220" height="95" class="bloque" /><text x="510.0" y="431.5" class="texto">Adquisición</text><text x="510.0" y="455.5" class="texto">XADC</text><rect x="80" y="390" width="220" height="95" class="bloque" /><text x="190.0" y="431.5" class="texto">MicroBlaze V</text><text x="190.0" y="455.5" class="texto">Control PR</text><path d="M 300 252 L 400 252" class="linea" marker-end="url(#flecha)" /><text x="350" y="237" class="etiqueta">PWM</text><path d="M 620 252 L 720 252" class="linea" marker-end="url(#flecha)" /><text x="670" y="237" class="etiqueta">Gate</text><path d="M 830 160 L 830 205" class="linea" marker-end="url(#flecha)" /><text x="900" y="190" class="etiqueta">V_DC</text><path d="M 940 252 L 1040 252" class="linea" marker-end="url(#flecha)" /><text x="990" y="237" class="etiqueta">v_o</text><path d="M 1150 300 L 1150 390" class="linea" marker-end="url(#flecha)" /><text x="1210" y="350" class="etiqueta">i_L</text><path d="M 1040 437 L 940 437" class="linea" marker-end="url(#flecha)" /><text x="990" y="422" class="etiqueta">i_sense</text><path d="M 720 437 L 620 437" class="linea" marker-end="url(#flecha)" /><text x="670" y="422" class="etiqueta">v_adc</text><path d="M 400 437 L 300 437" class="linea" marker-end="url(#flecha)" /><text x="350" y="422" class="etiqueta">sample_data</text><path d="M 190 390 L 190 300" class="linea" marker-end="url(#flecha)" /><text x="260" y="355" class="etiqueta">duty_ref</text></svg>

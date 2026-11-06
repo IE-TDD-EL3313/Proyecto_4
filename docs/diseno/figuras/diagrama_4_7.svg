@@ -1,0 +1,44 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1650" height="850" viewBox="0 0 1650 850"><rect x="0" y="0" width="1650" height="850" fill="white" /><style>
+.bloque {
+    fill: white;
+    stroke: black;
+    stroke-width: 2;
+}
+
+.linea {
+    fill: none;
+    stroke: black;
+    stroke-width: 2;
+    stroke-linejoin: miter;
+}
+
+.texto {
+    font-family: Arial, sans-serif;
+    font-size: 18px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.etiqueta {
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.titulo {
+    font-family: Arial, sans-serif;
+    font-size: 25px;
+    font-weight: bold;
+    fill: black;
+    text-anchor: middle;
+}
+
+.nota {
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+    fill: black;
+    text-anchor: middle;
+}
+</style><defs><marker id="flecha" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 1 L 9 5 L 0 9 Z" fill="black" /></marker></defs><text x="825.0" y="45" class="titulo">EJECUCIÓN DEL CONTROLADOR PR Y ALMACENAMIENTO DE MUESTRAS</text><rect x="80" y="120" width="220" height="90" class="bloque" /><text x="190.0" y="171.0" class="texto">AXI Timer</text><rect x="400" y="120" width="230" height="90" class="bloque" /><text x="515.0" y="159.0" class="texto">MicroBlaze V</text><text x="515.0" y="183.0" class="texto">ISR de control</text><rect x="730" y="120" width="230" height="90" class="bloque" /><text x="845.0" y="159.0" class="texto">Lectura de muestra</text><text x="845.0" y="183.0" class="texto">XADC</text><rect x="1060" y="120" width="230" height="90" class="bloque" /><text x="1175.0" y="159.0" class="texto">Controlador PR</text><text x="1175.0" y="183.0" class="texto">discreto</text><rect x="1390" y="120" width="210" height="90" class="bloque" /><text x="1495.0" y="159.0" class="texto">Actualización</text><text x="1495.0" y="183.0" class="texto">PWM</text><rect x="730" y="380" width="230" height="100" class="bloque" /><text x="845.0" y="424.0" class="texto">Buffer circular</text><text x="845.0" y="448.0" class="texto">en BRAM</text><rect x="400" y="590" width="230" height="90" class="bloque" /><text x="515.0" y="629.0" class="texto">Solicitud de envío</text><text x="515.0" y="653.0" class="texto">AXI GPIO</text><rect x="730" y="590" width="230" height="90" class="bloque" /><text x="845.0" y="629.0" class="texto">Rutina de envío</text><text x="845.0" y="653.0" class="texto">UART</text><rect x="1060" y="590" width="230" height="90" class="bloque" /><text x="1175.0" y="641.0" class="texto">AXI UART Lite</text><rect x="1390" y="590" width="210" height="90" class="bloque" /><text x="1495.0" y="629.0" class="texto">Computadora</text><text x="1495.0" y="653.0" class="texto">(PC)</text><path d="M 300 165 L 400 165" class="linea" marker-end="url(#flecha)" /><text x="350" y="150" class="etiqueta">timer_irq</text><path d="M 630 165 L 730 165" class="linea" marker-end="url(#flecha)" /><text x="680" y="150" class="etiqueta">Lectura</text><path d="M 960 165 L 1060 165" class="linea" marker-end="url(#flecha)" /><text x="1010" y="150" class="etiqueta">i[k]</text><path d="M 1290 165 L 1390 165" class="linea" marker-end="url(#flecha)" /><text x="1340" y="150" class="etiqueta">u[k]</text><path d="M 845 210 L 845 380" class="linea" marker-end="url(#flecha)" /><text x="905" y="310" class="etiqueta">Muestra i[k]</text><path d="M 630 635 L 730 635" class="linea" marker-end="url(#flecha)" /><text x="680" y="620" class="etiqueta">Solicitud</text><path d="M 845 480 L 845 590" class="linea" marker-end="url(#flecha)" /><text x="920" y="545" class="etiqueta">Datos</text><path d="M 960 635 L 1060 635" class="linea" marker-end="url(#flecha)" /><text x="1010" y="620" class="etiqueta">Escritura</text><path d="M 1290 635 L 1390 635" class="linea" marker-end="url(#flecha)" /><text x="1340" y="620" class="etiqueta">uart_tx</text></svg>

@@ -1,0 +1,37 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="760" viewBox="0 0 1600 760"><rect x="0" y="0" width="1600" height="760" fill="white" /><style>
+.bloque {
+    fill: white;
+    stroke: black;
+    stroke-width: 2;
+}
+
+.linea {
+    fill: none;
+    stroke: black;
+    stroke-width: 2;
+    stroke-linejoin: miter;
+}
+
+.texto {
+    font-family: Arial, sans-serif;
+    font-size: 19px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.etiqueta {
+    font-family: Arial, sans-serif;
+    font-size: 17px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.titulo {
+    font-family: Arial, sans-serif;
+    font-size: 25px;
+    font-weight: bold;
+    fill: black;
+    text-anchor: middle;
+}
+</style><defs><marker id="flecha" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 1 L 9 5 L 0 9 Z" fill="black" /></marker></defs><text x="800.0" y="48" class="titulo">SEGUNDO NIVEL: SISTEMA DE CONTROL DE CORRIENTE</text><rect x="65" y="220" width="230" height="100" class="bloque" /><text x="180.0" y="263.5" class="texto">Interfaz de</text><text x="180.0" y="290.5" class="texto">usuario</text><rect x="390" y="220" width="240" height="100" class="bloque" /><text x="510.0" y="263.5" class="texto">Procesamiento</text><text x="510.0" y="290.5" class="texto">y control</text><rect x="730" y="220" width="220" height="100" class="bloque" /><text x="840.0" y="263.5" class="texto">Generación</text><text x="840.0" y="290.5" class="texto">PWM</text><rect x="1050" y="220" width="230" height="100" class="bloque" /><text x="1165.0" y="277.0" class="texto">Accionamiento</text><rect x="1050" y="390" width="230" height="100" class="bloque" /><text x="1165.0" y="433.5" class="texto">Etapa de</text><text x="1165.0" y="460.5" class="texto">potencia</text><rect x="1050" y="570" width="230" height="100" class="bloque" /><text x="1165.0" y="627.0" class="texto">Carga RL</text><rect x="530" y="570" width="250" height="100" class="bloque" /><text x="655.0" y="613.5" class="texto">Adquisición</text><text x="655.0" y="640.5" class="texto">de corriente</text><path d="M 510 125 L 510 220" class="linea" marker-end="url(#flecha)" /><text x="585" y="155" class="etiqueta">Iref[k]</text><path d="M 295 270 L 390 270" class="linea" marker-end="url(#flecha)" /><path d="M 390 295 L 295 295" class="linea" marker-end="url(#flecha)" /><path d="M 630 270 L 730 270" class="linea" marker-end="url(#flecha)" /><text x="680" y="250" class="etiqueta">u[k]</text><path d="M 950 270 L 1050 270" class="linea" marker-end="url(#flecha)" /><path d="M 1165 320 L 1165 390" class="linea" marker-end="url(#flecha)" /><path d="M 1430 440 L 1280 440" class="linea" marker-end="url(#flecha)" /><text x="1350" y="420" class="etiqueta">Vdc</text><path d="M 1165 490 L 1165 570" class="linea" marker-end="url(#flecha)" /><path d="M 1280 620 L 1490 620" class="linea" marker-end="url(#flecha)" /><text x="1385" y="600" class="etiqueta">i_L(t) - Corriente regulada</text><path d="M 1050 620 L 780 620" class="linea" marker-end="url(#flecha)" /><path d="M 840 320 L 840 510 L 655 510 L 655 570" class="linea" marker-end="url(#flecha)" /><text x="745" y="495" class="etiqueta">pwm_trigger</text><path d="M 530 620 L 450 620 L 450 320" class="linea" marker-end="url(#flecha)" /><text x="400" y="520" class="etiqueta">I[k]</text></svg>
