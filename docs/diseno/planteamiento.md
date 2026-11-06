@@ -1,31 +1,42 @@
 # Planteamiento del diseño
 ## Proyecto 4 – Control de corriente de un inversor monofásico con un sistema embebido MicroBlaze V y periférico PWM personalizado
 
-<!--
-PLANTILLA DEL EQUIPO
-- Cada integrante edita solo sus secciones, desde su propia rama creada a partir de develop.
-- Responsables: Marvin = MicroBlaze V / Block Design / IP de Xilinx (issue #1)
-                Keylor = periférico PWM y registros AXI4-Lite (issue #2)
-                ADC/XADC, firmware y temporización (issue #3)
-- Las figuras van en docs/diseno/figuras/ con nombres descriptivos (ej. tercer_nivel_pwm.png).
-- Reemplazar cada *(Redactar: ...)* por el contenido correspondiente.
--->
-
 ---
 
 ## 1. Introducción y comprensión del problema
 
-*(Redactar — todos: el problema en 2–4 párrafos. Inversor monofásico en puente H que regula la corriente de una carga RL, con referencia sinusoidal de 50 Hz y amplitudes de 0,2, 0,5 y 1,0 A pico. Regulador PR discreto ejecutado en un MicroBlaze V. Ciclo del lazo: muestreo ADC → PR → actualización del PWM → buffer. Qué le corresponde a Taller y qué a PEDP.)*
+El presente proyecto tiene como propósito desarrollar un sistema digital embebido para el control de corriente de un inversor monofásico en configuración de puente H, encargado de alimentar una carga resistiva-inductiva (RL). El sistema debe regular la corriente de salida para que siga una referencia sinusoidal de 50 Hz, considerando amplitudes de 0,2 A, 0,5 A y 1,0 A pico. Para ello, se requiere integrar un sistema de adquisición de corriente, un algoritmo de control digital y un periférico de modulación por ancho de pulso (PWM), capaces de operar de manera coordinada y con una temporización definida.
 
+La solución propuesta utiliza un procesador MicroBlaze V, basado en la arquitectura RISC-V e implementado sobre la FPGA de la tarjeta Nexys 4 Rev. B. Este procesador ejecutará un controlador proporcional-resonante (PR) discreto, encargado de calcular la acción de control a partir de la diferencia entre la corriente de referencia y la corriente medida. La arquitectura incorpora memoria local BRAM, una interconexión AXI y periféricos para temporización, comunicación, adquisición de señales y generación PWM. El periférico PWM será desarrollado específicamente para producir las cuatro señales de conmutación del puente H mediante modulación unipolar y tiempos muertos configurables.
+
+El funcionamiento del sistema se basa en un lazo de control cerrado. La corriente de la carga se obtiene mediante un sensor y una etapa de acondicionamiento analógico, cuya salida es digitalizada mediante el XADC de la FPGA. Posteriormente, el MicroBlaze V procesa la medición, ejecuta el algoritmo PR y actualiza la referencia del periférico PWM. Este último genera las señales necesarias para controlar el inversor y proporciona un evento de sincronización para la adquisición de corriente. Adicionalmente, se contempla el almacenamiento de muestras en memoria y su transmisión hacia una computadora mediante UART, con el propósito de supervisar y analizar el comportamiento del sistema.
+
+El desarrollo se realiza de manera coordinada entre Taller de Diseño Digital y el equipo responsable de la etapa de potencia (PEDP). Taller de Diseño Digital se encarga de diseñar e integrar la arquitectura embebida, los periféricos digitales, el firmware de control y los mecanismos de comunicación y validación. Por su parte, PEDP proporciona los parámetros eléctricos del inversor, las características del sensor y del acondicionamiento, así como el diseño y los coeficientes del controlador PR. Esta distribución permite establecer interfaces y requisitos de integración para verificar progresivamente el sistema antes de su operación conjunta con la etapa de potencia.
 ---
 
 ## 2. Objetivos del proyecto
 
-**Objetivo general:** *(Redactar)*
+### 2.1. Objetivo general
 
-**Objetivos específicos:**
+Diseñar, implementar y validar un sistema digital embebido basado en el procesador MicroBlaze V, sobre la FPGA de la tarjeta Nexys 4 Rev. B, para ejecutar el control de corriente de un inversor monofásico en puente H mediante un regulador proporcional-resonante (PR) discreto, integrando adquisición de corriente, generación de PWM unipolar, temporización y comunicación con una computadora.
 
-1. *(Redactar)*
+### 2.2. Objetivos específicos
+
+1. Diseñar la arquitectura del sistema embebido mediante la integración del procesador MicroBlaze V, memoria local BRAM, interconexión AXI y periféricos de adquisición, temporización, comunicación y control.
+
+2. Desarrollar un periférico PWM personalizado en SystemVerilog, con interfaz AXI4-Lite, capaz de generar las cuatro señales de conmutación del puente H mediante modulación unipolar, incorporando tiempo muerto configurable y sincronización para la adquisición de corriente.
+
+3. Implementar un subsistema de adquisición de corriente basado en el XADC de la FPGA, que permita digitalizar la señal proveniente del sensor y proporcionar las mediciones al procesador mediante registros mapeados en memoria.
+
+4. Desarrollar el firmware en lenguaje C para ejecutar periódicamente el controlador PR discreto, utilizando las mediciones adquiridas y una referencia sinusoidal de 50 Hz con amplitudes de 0,2 A, 0,5 A y 1,0 A pico.
+
+5. Establecer un mecanismo de temporización mediante AXI Timer e interrupciones, que permita coordinar la adquisición de corriente, la ejecución del algoritmo de control y la actualización del periférico PWM.
+
+6. Implementar mecanismos de almacenamiento y comunicación mediante memoria local y UART, para transferir las muestras adquiridas hacia una computadora y facilitar su visualización y análisis.
+
+7. Verificar el funcionamiento de los módulos digitales mediante simulaciones y pruebas de integración, evaluando la correcta operación de las interfaces AXI, la generación PWM, la adquisición de corriente y el cumplimiento de los requisitos temporales del sistema.
+
+8. Integrar progresivamente el sistema digital con la etapa de potencia, en coordinación con PEDP, para evaluar el seguimiento de la corriente respecto a las referencias establecidas y comprobar el funcionamiento del lazo de control cerrado.
 
 ---
 
@@ -171,7 +182,7 @@ El subsistema de procesamiento constituye el núcleo de la arquitectura digital.
 
 El procesador ejecuta el firmware encargado de inicializar los periféricos, realizar el cálculo del controlador PR discreto, administrar las mediciones adquiridas y coordinar la comunicación con la computadora.
 
-### 6.1.1. Organización del subsistema de procesamiento
+#### 6.1.1. Organización del subsistema de procesamiento
 
 El subsistema está compuesto por los siguientes recursos:
 
@@ -189,7 +200,7 @@ La organización propuesta se presenta en el siguiente diagrama:
 
 ![MicroBlaze V, memoria local e interconexión](figuras/diagrama_4_1.svg)
 
-### 6.1.2. Memoria local BRAM
+#### 6.1.2. Memoria local BRAM
 
 La arquitectura contempla una memoria local de 32 KiB implementada mediante recursos Block RAM de la FPGA.
 
@@ -204,7 +215,7 @@ La memoria se utiliza para almacenar el programa embebido, sus variables, los es
 
 El uso de BRAM local permite disponer de memoria integrada en la FPGA y evita depender de una memoria externa para las operaciones básicas del firmware.
 
-### 6.1.3. Caché de instrucciones
+#### 6.1.3. Caché de instrucciones
 
 Se considera una caché de instrucciones de 8 KiB como parte de la configuración prevista para MicroBlaze V.
 
@@ -214,7 +225,7 @@ La habilitación de este recurso, su conexión con la jerarquía de memoria y su
 
 Por tanto, la caché se identifica como un requisito de arquitectura y no como un recurso cuya implementación ya se encuentre verificada.
 
-### 6.1.4. Interconexión AXI
+#### 6.1.4. Interconexión AXI
 
 La comunicación entre MicroBlaze V y los periféricos se realiza mediante una arquitectura de interconexión AXI.
 
@@ -238,7 +249,7 @@ La interconexión permite que el firmware configure los periféricos, consulte s
 
 Las direcciones base y los rangos definitivos se documentarán a partir del Address Editor de Vivado.
 
-### 6.1.5. Depuración mediante MDM/JTAG
+#### 6.1.5. Depuración mediante MDM/JTAG
 
 La arquitectura contempla el uso de un módulo de depuración asociado al procesador MicroBlaze V y accesible mediante JTAG.
 
@@ -246,7 +257,7 @@ Este recurso permite realizar operaciones de desarrollo y diagnóstico, como la 
 
 La interfaz de depuración se mantiene separada de las interfaces funcionales utilizadas para el control de corriente y la comunicación UART.
 
-### 6.1.6. Justificación de la organización propuesta
+#### 6.1.6. Justificación de la organización propuesta
 
 La arquitectura combina procesamiento programable y periféricos especializados para distribuir las funciones del sistema según sus necesidades temporales.
 
@@ -390,7 +401,7 @@ El periférico dispone de registros de configuración y estado, mecanismos de ca
 
 La señal `timer_irq` informa al sistema de interrupciones que se ha producido un evento de temporización.
 
-El mecanismo de conexión entre el temporizador y la entrada de interrupción del procesador deberá definirse durante la integración del Block Design. Si se utiliza un AXI Interrupt Controller, este recibirá la solicitud del temporizador y proporcionará la señal correspondiente al procesador.
+La arquitectura propuesta contempla un AXI Interrupt Controller para centralizar las solicitudes de interrupción generadas por los periféricos y transmitirlas al MicroBlaze V. En particular, la señal `timer_irq` del AXI Timer se conectará a una de sus entradas, permitiendo que el procesador atienda periódicamente la rutina de control. La configuración definitiva de las fuentes de interrupción, sus conexiones y prioridades se verificará durante la integración del Block Design en Vivado.
 
 La frecuencia definitiva de interrupción deberá seleccionarse considerando el período de muestreo requerido y el tiempo de ejecución del algoritmo PR.
 
@@ -456,11 +467,11 @@ La configuración final deberá verificarse mediante el Block Design y el Addres
 
 ## 7. Diagramas de cuarto nivel
 
-*(Redactar: introducción breve al cuarto nivel.)*
+Los diagramas de cuarto nivel presentan la descomposición funcional de los módulos personalizados del sistema, detallando los bloques internos responsables de implementar sus operaciones principales. Este nivel permite identificar las señales de entrada y salida, las relaciones entre subbloques y los mecanismos necesarios para garantizar su funcionamiento.
 
-Cada subbloque de este nivel sigue el mismo formato:
+En particular, se desarrolla la organización interna del periférico PWM y del subsistema de adquisición ADC/XADC. Para cada subbloque se describen su propósito, interfaces, funcionamiento, decisiones de diseño, comportamiento durante el reinicio y estrategia de validación.
 
-> **Objetivo** · **Entradas** (tabla) · **Salidas** (tabla) · **Diagrama** · **Relación con los demás módulos** · **Funcionamiento** · **Diseño y justificación técnica** · **Comportamiento durante el reset** · **Casos especiales y condiciones de borde** · **Estrategia de validación**
+Esta descomposición proporciona una base para la implementación en SystemVerilog, la elaboración de bancos de prueba y la posterior integración de los módulos con el procesador MicroBlaze V mediante las interfaces definidas en la arquitectura general.
 
 ### 7.1 Registros AXI4-Lite del PWM
 
@@ -847,10 +858,11 @@ La siguiente tabla identifica los recursos que deberán incorporarse al mapa de 
 | AXI Timer | Por asignar | Según configuración del IP | AXI4-Lite |
 | AXI UART Lite | Por asignar | Según configuración del IP | AXI4-Lite |
 | AXI GPIO | Por asignar | Según configuración del IP | AXI4-Lite |
+| AXI Interrupt Controller | Por asignar | Según configuración del IP | AXI4-Lite |
 | PWM Controller | Por asignar | Según decodificación del periférico | AXI4-Lite |
 | Interfaz ADC/XADC | Por asignar | Según decodificación del periférico | AXI4-Lite |
 
-Si la arquitectura final incorpora un AXI Interrupt Controller, también deberá reservarse una región de direcciones para sus registros de configuración y estado.
+El AXI Interrupt Controller se contempla como parte de la arquitectura propuesta para centralizar las solicitudes de interrupción de los periféricos y comunicarlas al MicroBlaze V. Su región de direcciones permitirá configurar y consultar el estado de las interrupciones. La conexión definitiva de las fuentes y la asignación de direcciones se verificarán durante la integración del Block Design en Vivado.
 
 #### 8.1.1. Organización de los accesos
 
@@ -944,10 +956,97 @@ DUTY_REF, freq_sel y DEADTIME se aplican en el siguiente valle mediante registro
 
 El PWM documentado actualmente vincula enable con portadora, trigger y compuertas. El arranque en fase mediante sync_start_i y el bloqueo independiente de compuertas requerido por WARMUP son ampliaciones pendientes del contrato C4. Se deben acordar sus señales y prioridades antes de habilitar el lazo integrado.
 
-### 8.4 Protocolo AXI4-Lite
+### 8.4. Protocolo AXI4-Lite
 
-*(Redactar: canales, handshake `VALID`/`READY`, respuestas y su uso entre el MicroBlaze V y los periféricos.)*
+El protocolo AXI4-Lite permite la comunicación entre el procesador MicroBlaze V y los periféricos mapeados en memoria mediante transacciones de lectura y escritura. En la arquitectura propuesta, este protocolo se utiliza para acceder a los registros de configuración, control, estado y datos de los periféricos personalizados, particularmente el generador PWM y el subsistema de adquisición ADC.
 
+AXI4-Lite utiliza una interfaz de tipo maestro-esclavo, donde el MicroBlaze V inicia las transacciones a través de la interconexión AXI y cada periférico responde a las solicitudes dirigidas a su espacio de direcciones. A diferencia de AXI4 completo, AXI4-Lite no admite transferencias en ráfaga y está orientado a operaciones individuales de acceso a registros.
+
+#### 8.4.1. Canales de comunicación
+
+El protocolo dispone de cinco canales independientes:
+
+| Canal | Señales principales | Función |
+|---|---|---|
+| Dirección de escritura (AW) | `AWADDR`, `AWVALID`, `AWREADY` | Transmite la dirección del registro que se desea escribir. |
+| Datos de escritura (W) | `WDATA`, `WSTRB`, `WVALID`, `WREADY` | Transmite el dato y los bytes habilitados para escritura. |
+| Respuesta de escritura (B) | `BRESP`, `BVALID`, `BREADY` | Informa el resultado de la operación de escritura. |
+| Dirección de lectura (AR) | `ARADDR`, `ARVALID`, `ARREADY` | Transmite la dirección del registro que se desea leer. |
+| Datos y respuesta de lectura (R) | `RDATA`, `RRESP`, `RVALID`, `RREADY` | Devuelve el dato solicitado y el estado de la operación. |
+
+Los canales de lectura y escritura funcionan de manera independiente, permitiendo que cada operación utilice sus propias señales de control y respuesta.
+
+#### 8.4.2. Mecanismo de transferencia VALID/READY
+
+La transferencia de información en AXI4-Lite se realiza mediante un mecanismo de sincronización basado en las señales `VALID` y `READY`.
+
+La señal `VALID` indica que el emisor presenta información válida en el canal correspondiente, mientras que `READY` indica que el receptor está preparado para aceptarla.
+
+Una transferencia se completa únicamente cuando ambas señales se encuentran activas durante el mismo flanco ascendente del reloj:
+
+`VALID = 1` y `READY = 1`.
+
+Si el receptor no está preparado, el emisor debe mantener la información y la señal `VALID` estables hasta que se complete la transferencia.
+
+Este mecanismo permite coordinar la comunicación entre el procesador y los periféricos sin asumir que todas las operaciones se completan en un único ciclo de reloj.
+
+#### 8.4.3. Operación de escritura
+
+Para escribir un registro de un periférico, el procesador inicia una transacción mediante los canales de dirección y datos de escritura.
+
+El procedimiento general es el siguiente:
+
+1. El maestro presenta la dirección del registro mediante `AWADDR` y activa `AWVALID`.
+2. El maestro presenta el dato mediante `WDATA`, indica los bytes habilitados con `WSTRB` y activa `WVALID`.
+3. El periférico acepta la dirección y los datos cuando se completan los respectivos intercambios `VALID/READY`.
+4. Una vez recibida la información necesaria, el periférico ejecuta la escritura y genera una respuesta mediante `BRESP` y `BVALID`.
+5. La transacción finaliza cuando el maestro acepta la respuesta mediante `BREADY`.
+
+Los canales AW y W son independientes, por lo que sus transferencias no necesariamente ocurren durante el mismo ciclo de reloj.
+
+En el proyecto, este mecanismo permite configurar registros como la habilitación del PWM, los valores de modulación, los tiempos muertos y los parámetros de funcionamiento de los periféricos.
+
+#### 8.4.4. Operación de lectura
+
+La lectura de un registro se realiza mediante los canales AR y R.
+
+El procedimiento general es el siguiente:
+
+1. El maestro presenta la dirección del registro mediante `ARADDR` y activa `ARVALID`.
+2. El periférico acepta la dirección cuando se completa el intercambio `ARVALID/ARREADY`.
+3. El periférico obtiene el contenido del registro solicitado y lo presenta mediante `RDATA`.
+4. El periférico activa `RVALID` e informa el resultado de la operación mediante `RRESP`.
+5. La transferencia finaliza cuando el maestro acepta los datos mediante `RREADY`.
+
+Este mecanismo permite que el MicroBlaze V consulte los registros de estado, las banderas de operación y los datos adquiridos por los periféricos.
+
+#### 8.4.5. Respuestas y manejo de errores
+
+Los canales de respuesta utilizan señales de dos bits para indicar el resultado de una transacción.
+
+| Código | Respuesta | Descripción |
+|---|---|---|
+| `00` | `OKAY` | La operación se completó correctamente. |
+| `10` | `SLVERR` | El periférico detectó un error durante la operación. |
+| `11` | `DECERR` | La dirección solicitada no pudo ser decodificada. |
+
+El código `01`, correspondiente a `EXOKAY` en AXI4, no se utiliza en AXI4-Lite.
+
+Las respuestas permiten identificar accesos incorrectos o condiciones de error, de acuerdo con la implementación del periférico y la interconexión.
+
+#### 8.4.6. Aplicación en la arquitectura propuesta
+
+En el sistema desarrollado, AXI4-Lite constituye el mecanismo principal de acceso a los registros de los periféricos personalizados.
+
+El MicroBlaze V actúa como iniciador de las operaciones de lectura y escritura, mientras que la interconexión AXI dirige cada solicitud hacia el periférico correspondiente según la dirección asignada.
+
+En el periférico PWM, las escrituras permiten actualizar los parámetros de modulación y control, mientras que las lecturas permiten consultar su estado.
+
+En el subsistema ADC, las operaciones de lectura permiten recuperar las muestras digitalizadas y consultar los indicadores de disponibilidad o estado definidos en su mapa de registros.
+
+La comunicación mediante AXI4-Lite permite separar el procesamiento realizado por el firmware de las funciones implementadas en hardware, facilitando la integración, verificación y reutilización de los periféricos.
+
+Las direcciones base y los rangos definitivos de cada periférico se establecerán durante la configuración del Block Design mediante el Address Editor de Vivado.
 ---
 
 ## 9. Software embebido y aplicación de PC
@@ -1461,13 +1560,14 @@ El CSV se confronta con la captura binaria y sus metadatos; la conversión no de
 
 ## 13. Distribución del trabajo
 
+La distribución de responsabilidades se establece de acuerdo con los subsistemas principales de la arquitectura. Cada integrante desarrolla y documenta los módulos asignados, mientras que la integración del sistema y la revisión de las interfaces se realizan de manera coordinada.
+
 | Integrante / área | Área principal | Issues |
 |---|---|---|
-| Marvin | *(Completar)* | |
-| Keylor | Periférico PWM: diseño en SystemVerilog, interfaz AXI4-Lite, testbench y documentación | #2, #5, #8, #11, #14, #17 |
-| Adquisición y firmware | ADC/XADC, temporización y exportación UART | #3 (diseño); implementación en issues posteriores |
-| Todos | Integración y revisión cruzada de pull requests | — |
-
+| Marvin | Arquitectura del sistema embebido basada en MicroBlaze V, diseño e integración del Block Design, organización de memoria BRAM, interconexión AXI, configuración de periféricos de Xilinx y documentación de los diagramas de arquitectura de primer, segundo y tercer nivel. | #1 (diseño); implementación en issues posteriores |
+| Keylor | Periférico PWM: diseño en SystemVerilog, interfaz AXI4-Lite, testbench y documentación. | #2, #5, #8, #11, #14, #17 |
+| Adquisición y firmware | ADC/XADC, temporización y exportación UART. | #3 (diseño); implementación en issues posteriores |
+| Todos | Integración del sistema, revisión cruzada de pull requests y verificación de las interfaces entre subsistemas. | — |
 ---
 
 ## 14. Referencias
