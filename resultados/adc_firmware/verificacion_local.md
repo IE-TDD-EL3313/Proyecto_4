@@ -4,7 +4,7 @@ Fecha: 10 de noviembre de 2026. Alcance: RTL aislado, firmware portable, modelo 
 
 Revalidación del 11 de noviembre de 2026: se ejecutaron nuevamente `test_local.py` y `cross_compile_core.py`, con los mismos resultados PASS y recuentos de la tabla. Las fuentes RTL actuales coinciden por SHA-256 con las copias utilizadas en la síntesis Nexys 4 del día 10; no se presenta esa síntesis como una nueva ejecución del día 11.
 
-La [sección 16 del planteamiento](../../docs/diseno/planteamiento.md#16-explicación-del-código-y-preparación-de-la-defensa) explica todos los archivos, funciones y alcance de la defensa. La [sección 17](../../docs/diseno/planteamiento.md#17-revisión-de-requisitos-y-alcance-de-la-entrega) contiene la revisión de los criterios de aceptación de los issues #6, #9, #12, #15 y #18. La conclusión es cumplimiento parcial con integración física pendiente. También se registra la diferencia entre la versión 2025.1 indicada en el enunciado y el entorno 2026.1 utilizado.
+La verificación local respalda un avance de implementación con integración física pendiente. El enunciado indica la versión 2025.1, mientras el entorno utilizado es 2026.1; esa diferencia debe confirmarse con el profesor/equipo o resolverse mediante reproducción en la versión solicitada.
 
 ## Reproducción
 

@@ -110,11 +110,6 @@ la sección 15 de [planteamiento.md](docs/diseno/planteamiento.md#15-implementac
 Los resultados ejecutados se registran en
 [verificacion_local.md](resultados/adc_firmware/verificacion_local.md).
 
-La [sección 16 del planteamiento](docs/diseno/planteamiento.md#16-explicación-del-código-y-preparación-de-la-defensa)
-explica cada archivo, las funciones y un guion de defensa. La
-[sección 17](docs/diseno/planteamiento.md#17-revisión-de-requisitos-y-alcance-de-la-entrega)
-contrasta el avance con el enunciado y los criterios de los issues.
-
 Para decodificar una captura binaria guardada:
 
 ```powershell
