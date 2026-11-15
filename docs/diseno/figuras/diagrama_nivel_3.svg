@@ -1,0 +1,37 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1550" height="1100" viewBox="0 0 1550 1100"><rect x="0" y="0" width="1550" height="1100" fill="white" /><style>
+.bloque {
+    fill: white;
+    stroke: black;
+    stroke-width: 2;
+}
+
+.linea {
+    fill: none;
+    stroke: black;
+    stroke-width: 2;
+    stroke-linejoin: miter;
+}
+
+.texto {
+    font-family: Arial, sans-serif;
+    font-size: 18px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.etiqueta {
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.titulo {
+    font-family: Arial, sans-serif;
+    font-size: 25px;
+    font-weight: bold;
+    fill: black;
+    text-anchor: middle;
+}
+</style><defs><marker id="flecha" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 1 L 9 5 L 0 9 Z" fill="black" /></marker><marker id="flecha_inicio" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 1 L 9 5 L 0 9 Z" fill="black" /></marker></defs><text x="775.0" y="45" class="titulo">TERCER NIVEL: ARQUITECTURA DEL SISTEMA DIGITAL</text><rect x="95" y="115" width="190" height="80" class="bloque" /><text x="190.0" y="148.5" class="texto">Reloj y</text><text x="190.0" y="173.5" class="texto">reset</text><rect x="435" y="115" width="230" height="80" class="bloque" /><text x="550.0" y="148.5" class="texto">Caché de instrucciones</text><text x="550.0" y="173.5" class="texto">8 KiB</text><rect x="850" y="115" width="220" height="80" class="bloque" /><text x="960.0" y="148.5" class="texto">Depuración</text><text x="960.0" y="173.5" class="texto">MDM / JTAG</text><rect x="425" y="275" width="270" height="115" class="bloque" /><text x="560.0" y="313.5" class="texto">MicroBlaze V</text><text x="560.0" y="338.5" class="texto">CPU RISC-V</text><text x="560.0" y="363.5" class="texto">100 MHz</text><rect x="805" y="275" width="230" height="90" class="bloque" /><text x="920.0" y="313.5" class="texto">Controladores</text><text x="920.0" y="338.5" class="texto">ILMB / DLMB</text><rect x="1160" y="275" width="230" height="90" class="bloque" /><text x="1275.0" y="313.5" class="texto">BRAM local</text><text x="1275.0" y="338.5" class="texto">32 KiB</text><rect x="85" y="285" width="235" height="95" class="bloque" /><text x="202.5" y="326.0" class="texto">AXI Interrupt</text><text x="202.5" y="351.0" class="texto">Controller</text><rect x="445" y="505" width="230" height="90" class="bloque" /><text x="560.0" y="543.5" class="texto">AXI Interconnect</text><text x="560.0" y="568.5" class="texto">AXI4 / AXI4-Lite</text><rect x="80" y="760" width="200" height="85" class="bloque" /><text x="180.0" y="808.5" class="texto">AXI Timer</text><rect x="350" y="760" width="200" height="85" class="bloque" /><text x="450.0" y="808.5" class="texto">AXI UART Lite</text><rect x="620" y="760" width="200" height="85" class="bloque" /><text x="720.0" y="808.5" class="texto">AXI GPIO</text><rect x="890" y="760" width="200" height="85" class="bloque" /><text x="990.0" y="796.0" class="texto">Controlador PWM</text><text x="990.0" y="821.0" class="texto">AXI4-Lite</text><rect x="1160" y="760" width="200" height="85" class="bloque" /><text x="1260.0" y="796.0" class="texto">Adquisición XADC</text><text x="1260.0" y="821.0" class="texto">AXI4-Lite</text><rect x="350" y="970" width="200" height="80" class="bloque" /><text x="450.0" y="1003.5" class="texto">Computadora</text><text x="450.0" y="1028.5" class="texto">PC</text><rect x="620" y="970" width="200" height="80" class="bloque" /><text x="720.0" y="1003.5" class="texto">Pulsadores</text><text x="720.0" y="1028.5" class="texto">y LED</text><rect x="890" y="970" width="200" height="80" class="bloque" /><text x="990.0" y="1003.5" class="texto">Drivers de</text><text x="990.0" y="1028.5" class="texto">compuerta</text><path d="M 285 155 L 365 155 L 365 315 L 425 315" class="linea" marker-end="url(#flecha)" /><path d="M 550 195 L 550 275" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><path d="M 850 155 L 750 155 L 750 335 L 695 335" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><text x="800" y="140" class="etiqueta">DEBUG</text><path d="M 320 345 L 425 345" class="linea" marker-end="url(#flecha)" /><text x="375" y="330" class="etiqueta">irq</text><path d="M 695 355 L 805 355" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><text x="750" y="380" class="etiqueta">ILMB / DLMB</text><path d="M 1035 320 L 1160 320" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><text x="1100" y="305" class="etiqueta">LMB</text><path d="M 560 390 L 560 505" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><text x="620" y="455" class="etiqueta">AXI4</text><path d="M 560 595 L 560 690" class="linea" /><path d="M 180 690 L 1260 690" class="linea" /><path d="M 180 690 L 180 760" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><path d="M 450 690 L 450 760" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><path d="M 720 690 L 720 760" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><path d="M 990 690 L 990 760" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><path d="M 1260 690 L 1260 760" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><text x="760" y="675" class="etiqueta">AXI4-Lite</text><path d="M 80 802 L 35 802 L 35 335 L 85 335" class="linea" marker-end="url(#flecha)" /><text x="95" y="730" class="etiqueta">timer_irq</text><path d="M 450 845 L 450 970" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><text x="520" y="920" class="etiqueta">UART TX/RX</text><path d="M 720 845 L 720 970" class="linea" marker-start="url(#flecha_inicio)" marker-end="url(#flecha)" /><text x="775" y="920" class="etiqueta">GPIO</text><path d="M 990 845 L 990 970" class="linea" marker-end="url(#flecha)" /><text x="1040" y="920" class="etiqueta">PWM[3:0]</text><path d="M 1090 805 L 1120 805 L 1120 920 L 1260 920 L 1260 845" class="linea" marker-end="url(#flecha)" /><text x="1190" y="905" class="etiqueta">pwm_trigger_o</text><path d="M 1510 805 L 1360 805" class="linea" marker-end="url(#flecha)" /><text x="1435" y="790" class="etiqueta">Entrada analógica</text></svg>

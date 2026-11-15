@@ -1,0 +1,44 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1050" height="600" viewBox="0 0 1050 600"><rect x="0" y="0" width="1050" height="600" fill="white" /><style>
+.bloque {
+    fill: white;
+    stroke: black;
+    stroke-width: 2;
+}
+
+.linea {
+    fill: none;
+    stroke: black;
+    stroke-width: 2;
+    stroke-linejoin: miter;
+}
+
+.texto {
+    font-family: Arial, sans-serif;
+    font-size: 18px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.etiqueta {
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.titulo {
+    font-family: Arial, sans-serif;
+    font-size: 23px;
+    font-weight: bold;
+    fill: black;
+    text-anchor: middle;
+}
+
+.nota {
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    fill: black;
+    text-anchor: middle;
+}
+</style><defs><marker id="flecha" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 1 L 9 5 L 0 9 Z" fill="black" /></marker></defs><text x="525.0" y="38" class="titulo">INTERFAZ DE USUARIO: AXI GPIO Y AXI UART LITE</text><rect x="55" y="220" width="200" height="90" class="bloque" /><text x="155.0" y="271.0" class="texto">AXI Interconnect</text><rect x="345" y="115" width="200" height="85" class="bloque" /><text x="445.0" y="163.5" class="texto">AXI GPIO</text><rect x="345" y="325" width="200" height="85" class="bloque" /><text x="445.0" y="373.5" class="texto">AXI UART Lite</text><rect x="655" y="70" width="205" height="80" class="bloque" /><text x="757.5" y="104.5" class="texto">Pulsadores</text><text x="757.5" y="127.5" class="texto">Nexys 4</text><rect x="655" y="190" width="205" height="80" class="bloque" /><text x="757.5" y="224.5" class="texto">LED</text><text x="757.5" y="247.5" class="texto">Nexys 4</text><rect x="655" y="325" width="205" height="85" class="bloque" /><text x="757.5" y="362.0" class="texto">Computadora</text><text x="757.5" y="385.0" class="texto">(PC)</text><path d="M 255 245 L 295 245 L 295 157 L 345 157" class="linea" marker-start="url(#flecha)" marker-end="url(#flecha)" /><text x="300" y="143" class="etiqueta">AXI4-Lite</text><path d="M 255 285 L 295 285 L 295 367 L 345 367" class="linea" marker-start="url(#flecha)" marker-end="url(#flecha)" /><text x="290" y="393" class="etiqueta">AXI4-Lite</text><path d="M 655 110 L 600 110 L 600 138 L 545 138" class="linea" marker-end="url(#flecha)" /><text x="600" y="97" class="etiqueta">gpio_in</text><path d="M 545 178 L 600 178 L 600 230 L 655 230" class="linea" marker-end="url(#flecha)" /><text x="605" y="256" class="etiqueta">gpio_out</text><path d="M 545 348 L 655 348" class="linea" marker-end="url(#flecha)" /><text x="600" y="335" class="etiqueta">uart_tx</text><path d="M 655 389 L 545 389" class="linea" marker-end="url(#flecha)" /><text x="600" y="377" class="etiqueta">uart_rx</text></svg>
