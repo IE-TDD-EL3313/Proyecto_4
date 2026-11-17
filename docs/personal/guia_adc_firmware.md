@@ -353,3 +353,129 @@ Fuente: [Issue #18](https://github.com/IE-TDD-EL3313/Proyecto_4/issues/18), abie
 8. Revisar el código mediante PR y consolidar el informe con los resultados efectivamente obtenidos.
 
 La revisión de código y las pruebas actuales permiten publicar un avance de implementación en la rama personal. La entrega funcional completa permanece pendiente de los pasos anteriores.
+
+## 3. Revisión de integración del 15 de noviembre de 2026
+
+### 3.1 Versiones y conclusión
+
+Se descargaron las referencias remotas y se contrastaron las siguientes versiones:
+
+| Componente | Rama y commit revisados |
+|---|---|
+| ADC y firmware, incluida esta guía | `feat/adc-firmware`, `56f17d8` antes de agregar esta revisión |
+| Entrega de ADC y firmware sin documentos personales | `integracion/adc-firmware`, `4609569` |
+| Proyecto compartido más reciente | `origin/develop`, `98b0758` |
+| Arquitectura MicroBlaze V | `origin/feat/arquitectura-microblaze-v`, `a3010b4` |
+| PWM | `origin/feat/pwm-rtl`, `9deebc5`; su RTL y testbench coinciden con los de `develop` |
+
+**La integración funcional todavía está incompleta.** En `develop` están el proyecto base de MicroBlaze V y el RTL del PWM; los commits de implementación del ADC y firmware aún están en sus ramas de trabajo. El Block Design tampoco instancia el PWM ni el wrapper ADC personalizado. La conservación del diseño escrito en `planteamiento.md` no significa que los periféricos estén conectados y ejecutándose.
+
+La revisión no efectuó merges, commits, push ni cambios en el código compartido. Esta sección pertenece a la guía personal y no se agrega a la rama de integración.
+
+### 3.2 Compatibilidades comprobadas
+
+- El dispositivo del proyecto es `xc7a100tcsg324-1`, correspondiente a la selección de Nexys 4 utilizada en el desarrollo.
+- La configuración guardada del MicroBlaze V indica 100 MHz, caché de instrucciones de 8192 bytes, multiplicación/división habilitada, sin FPU y sin caché de datos. La memoria local está mapeada con 32 KiB. Esto concuerda con la base prevista; falta el ELF y su mapa de memoria final.
+- UARTLite está configurado para 115200 baudios, ocho bits y sin paridad, compatible con la trama y el receptor. La comunicación física aún debe comprobarse.
+- Timer está conectado a la entrada 0 del concatenador de interrupciones; UART está en la entrada 1. El registro del handler y las prioridades efectivas corresponden al BSP pendiente.
+- Los offsets PWM `CTRL_STATUS=0x00`, `DUTY_REF=0x04` y `DEADTIME=0x08`, el signo Q1.15 y el límite de ±31129 coinciden con el driver. Se añadieron `gates_en` en bit 4, `gates_on` en bit 5, `fault` en bit 6 y `SYNC_PHASE=0x0C`.
+- Con `gates_en=0`, la portadora y el trigger siguen funcionando sin pulsos de compuerta. El trigger tiene cuatro ciclos. A 20 kHz, la portadora y las muestras de la prueba conjunta conservan un período de 5000 ciclos.
+- Los pines de reloj, reset, UART y VAUX3 del archivo `system_pins.xdc` coinciden con las asignaciones del `Nexys-4-Master.xdc` incluido en el repositorio. Esto comprueba consistencia entre archivos, no el acondicionamiento analógico ni una medición física.
+
+### 3.3 Pendientes que impiden dar por integrada la aplicación
+
+#### A. Conectar los periféricos personalizados y conservar el contrato ADC
+
+El BD contiene `xadc_wiz_0` con `INTERFACE_SELECTION=Enable_AXI`, `TIMING_MODE=Continuous` y canal `VAUXP3_VAUXN3`. Su segmento AXI está en `0x44A00000`. No contiene `xadc_axi_lite` ni `pwm_controller_axi`, y no existe una conexión de `generateout0` al PWM ni del trigger PWM al wrapper.
+
+El driver `tdd_adc_read` no es un driver del XADC Wizard AXI: espera los registros propios `DATA`, `SEQ`, `TIME`, `STATUS` y `TICKS`. **No debe conectarse directamente a la base del Wizard suponiendo que los offsets significan lo mismo.** Para conservar la adquisición implementada, se debe integrar el wrapper AXI personalizado y un XADC con interfaz DRP y conversión por evento, conectando CONVST/EOC/DRDY/DO, reloj, reset y disponibilidad. Elegir otra arquitectura exige adaptar el firmware y volver a demostrar coherencia y fase.
+
+También hay que unificar el canal: el wrapper conserva `DRP_ADDRESS=0x10` como valor candidato para VAUX0, mientras la plataforma selecciona VAUX3. La selección y la dirección DRP correspondientes deben configurarse juntas y verificarse con una señal conocida.
+
+Responsabilidad de coordinación: plataforma y adquisición. Primero se valida una muestra conocida; después se habilita el lazo.
+
+#### B. Evitar muestras anteriores a la sincronización
+
+La secuencia descrita de habilitar portadora/trigger antes de arrancar Timer permite que el ADC publique una muestra antes de establecer la fase. `VALID` permanece activo hasta reset; deshabilitar el ADC no borra una publicación anterior.
+
+Se reprodujeron dos secuencias con el RTL real del PWM y de adquisición, respuestas ADC sintéticas y pulsos que representan el Timer. Las tuplas generadas se procesaron después mediante el núcleo C real:
+
+| Secuencia | Primera atención | Atenciones posteriores |
+|---|---|---|
+| ADC habilitado antes del primer `sync_start_i` | Muestra válida con edad de 5019 ticks; `TDD_FAULT_TIME` | El supervisor permanece en FAULT |
+| ADC inicialmente sin muestra y habilitado en la sincronización | No hay muestra válida; permanece en WARMUP | Muestras con edad de 1019 ticks y separación de 5000 ticks; pasa a RUNNING |
+
+La ventana de edad de la prueba fue de 900 a 1200 ticks; los 20 ciclos de demora de servicio y los tiempos ADC del modelo son sintéticos. No representan latencia o conversión medida en FPGA.
+
+Se debe definir un arranque que descarte las muestras previas y tome la primera línea de base después de sincronizar. Una opción es mantener la adquisición deshabilitada y sin `VALID` hasta el evento inicial; otra es modificar WARMUP para descartar publicaciones anteriores a una marca de sincronización, conservando un tiempo máximo de espera. Cambiar únicamente ENABLE no invalida una muestra ya publicada. Este paso debe probarse también después de una falla y un rearme.
+
+#### C. Actualizar C4 por la precarga del bootstrap
+
+El PWM nuevo libera su estado `gates_on` en el **pico** y mantiene los MOSFET inferiores durante `PRECHARGE_CYC=2000` ciclos antes de iniciar la modulación normal. El firmware y el texto anterior todavía usan `release_at_valley` y liberación en el valle. No es el mismo contrato.
+
+La prueba PWM verifica el arranque con inferiores primero y ausencia de conducción simultánea en las condiciones ensayadas. El cambio por bootstrap debe incorporarse a la secuencia del firmware, con confirmación de habilitación y de fin de precarga o con una secuencia temporal equivalente comprobada. `gates_on` por sí solo no significa que la precarga haya terminado. El estado RUNNING y la primera actuación deben describir el comportamiento real.
+
+Además, `sync_load = sync_start_i && !sync_prev && !gates_on_o` acepta nuevos flancos mientras las compuertas están bloqueadas: **hay detección de flanco, pero no armado de un solo uso**. La prueba existente conserva la fase con pulsos periódicos ya alineados; una prueba adicional confirmó que otro pulso fuera de fase vuelve a cargar 1000 sin rearme. Para cumplir el contrato original se necesita una lógica de armado externo o interno. Si se decide conservar la resincronización periódica durante WARMUP, hay que documentar ese contrato y probar sus efectos en las muestras.
+
+`SYNC_PHASE` también admite escrituras sin comprobar que el PWM esté detenido. El adaptador debe impedir cambios durante operación y validar el rango, o el hardware debe aplicar esa restricción. No se declara incumplida la fase estable a 20 kHz por estas observaciones; se señalan las condiciones que aún no están garantizadas por hardware.
+
+Responsabilidad de coordinación: PWM, plataforma y firmware. Faltan las implementaciones de placa de bloqueo, solicitud de liberación y armado; no basta con pasar `c4_confirmed=true`.
+
+#### D. Acordar la tabla de frecuencias y el período representable
+
+El PWM cambió a `00=10 kHz`, `01≈15.0015 kHz`, `10=20 kHz` y `11=20 kHz`. El texto anterior del ADC/firmware todavía enumera 5/10/20/40 kHz.
+
+Para `N=3333`, el período real es **6666 ciclos**, de modo que la frecuencia es `100000000/6666` Hz. El núcleo C, la captura y el receptor v1 exigen `fs_hz * period_ticks = 100000000` con `fs_hz` entero. No existe un valor entero que cumpla esa condición para 6666 ciclos. Se comprobó ejecutando `tdd_config_valid` que la pareja `15000,6666` se rechaza; `tdd_timer_prepare(15000)` también la rechaza porque la división no es exacta.
+
+El caso común de 20 kHz y 5000 ciclos sí es compatible. Para añadir la opción de aproximadamente 15 kHz se debe representar el tiempo por período y reloj —o mediante una frecuencia racional— en Timer, fase de referencia, PR, captura y receptor. Deben revisarse los coeficientes y la compatibilidad/versionado de la trama. Redondear solamente el campo Hz no corrige la desigualdad ni garantiza la fase.
+
+#### E. Completar BSP, GPIO y coherencia documental
+
+- GPIO está configurado como entrada/salida dual de ocho bits, pero sus señales no aparecen conectadas a puertos externos en el BD revisado. Faltan botón de captura, salidas de instrumentación y sus constraints.
+- Timer tiene `enable_timer2=0`; el diseño escrito y el helper anterior proponen dos contadores, y el driver escribe cero en `0x10` durante la preparación. Se debe unificar la selección y el driver. Esto es una diferencia de configuración; no se demostró una falla de bus por esa escritura.
+- Faltan `main`, adaptadores MMIO con acceso ordenado y finalización de escrituras, registro INTC, envío UART y rearme de placa. Los callbacks sintéticos de las pruebas no sustituyen esos componentes.
+- En `develop`, las secciones del PWM describen pico/precarga y frecuencias nuevas, pero los apartados 8.3.3, 9.1, 9.2 y varias pruebas del plan conservan el contrato anterior. La tabla C4 indica implementación PWM y reconoce que falta simulación con Timer; no debe interpretarse como aceptación del sistema completo.
+- La previsualización de merge de `planteamiento.md` no produjo conflictos de texto. **Eso no resuelve estas contradicciones de contenido.**
+- Los valores de potencia añadidos al documento compartido —24 V, R=5 Ω, L=30 mH— difieren del modelo sintético anterior —12 V, 5 Ω, 2.2 mH—. Las pruebas antiguas siguen siendo pruebas de software; no validan esos nuevos parámetros ni autorizan reutilizar sus coeficientes sin contrastarlos con PEDP.
+
+### 3.4 Pruebas y evidencia local
+
+| Comprobación ejecutada | Resultado y alcance |
+|---|---|
+| `scripts/test_local.py` de la rama personal | 284 comprobaciones RTL, 64508 de núcleo/captura, 70 de runtime y 11 pruebas Python, todas satisfactorias; los contadores incluyen iteraciones |
+| Testbench PWM de `develop` | 72 comprobaciones satisfactorias, cero fallos |
+| Conexión PWM → adquisición y reproducción de tuplas en C | Dos escenarios, diez comprobaciones RTL por escenario; confirma período, publicación, bloqueo, pico y aceptación de una segunda sincronización. El escenario de muestra previa reproduce la falla de arranque esperada |
+| Inspección del BD y de los XCI | Confirma parámetros y ausencia de conexiones personalizadas, generateout y GPIO externo |
+| Vivado 2026.1 sobre copia temporal del proyecto remoto | `open_bd_design`, `validate_bd_design -force`, `report_ip_status` y `make_wrapper` completados; valida la plataforma base, no la integración pendiente |
+| Previsualización de merge del Markdown | Sin conflictos textuales; requiere consolidación semántica |
+
+Los archivos de revisión están en [build/revision_integracion_20261115/](../../build/revision_integracion_20261115/), excluidos de Git: snapshots remotos, `pwm_sim.log`, `integration_probe.log`, CSV de tuplas, `tb_integration_probe.sv`, `probe_control.c`, `bd_connectivity_audit.json` y previsualización del documento. Las pruebas propias conservan su log en [build/host/verificacion.txt](../../build/host/verificacion.txt).
+
+El log `vivado_validation.log` contiene la marca `REVIEW_VALIDATION_COMPLETED`. Se generó el wrapper que no venía versionado. La apertura advierte sobre archivos de runs y carpetas generadas ausentes, coherente con su exclusión de Git; la generación también informa diferencia de ancho entre las direcciones de 32 bits del bloque de memoria y las de 15 bits del controlador BRAM, conectando los bits inferiores. Estas advertencias deben revisarse al cerrar la plataforma y su memoria; no se ejecutaron síntesis ni implementación completa para resolverlas. Los intentos iniciales de ejecutar Vivado con permisos restringidos no llegaron a validar el diseño; el resultado indicado corresponde a la ejecución posterior completada con el usuario local.
+
+La prueba conjunta usa componentes RTL reales y control C real, pero ADC/Timer sintéticos y procesamiento de tuplas fuera del simulador. No ejecuta MicroBlaze, AXI interconectado, modelo analógico AMD ni potencia. No se midieron WCET, jitter o hardware, y no se realizó implementación completa.
+
+### 3.5 Orden recomendado de integración
+
+1. Llevar el código técnico de `integracion/adc-firmware` a la integración compartida, manteniendo fuera esta guía personal. Consolidar el documento con ambos trabajos.
+2. Acordar C4 actualizado: sincronización armada, bloqueo independiente, pico y precarga, estados de habilitación y rearme.
+3. Usar inicialmente el caso común de 20 kHz. Preparar aparte el cambio necesario para 6666 ciclos.
+4. Integrar PWM y wrapper ADC con el XADC en modo compatible, unificar VAUX3/dirección DRP y conectar Timer, interrupciones y GPIO.
+5. Implementar el arranque sin muestras anteriores a la sincronización y los adaptadores BSP. Validar la captura con una entrada conocida y comprobar fallas/rearme con potencia deshabilitada.
+6. Generar XSA/BSP, enlazar la aplicación y revisar mapa de memoria; ejecutar la simulación conjunta y las mediciones temporales antes del ensayo de potencia.
+
+## 4. Actualización de la implementación del 16 de noviembre
+
+Las explicaciones anteriores describen la versión inicial y la revisión que motivó la integración. Para defender el código actualizado hay que considerar estos cambios:
+
+- Se incorporó `develop` en la rama personal. La entrega técnica se prepara en `integracion/adc-firmware`, sin este directorio personal; el PR se dirige a `develop` y requiere revisión.
+- PWM tiene armado de un solo uso: `sync_arm` bit7, `sync_done` bit8, `precharge` bit9 y `power_ready` bit10. Pulsos posteriores se ignoran y SYNC_PHASE solo se escribe con PWM detenido. El ADC recibe el trigger únicamente después de sincronizar.
+- `xadc_startup_guard.sv` coordina el reset físico y disponibilidad. ADC_CTRL bit3 solicita reset y ADC_READY está en 0x1C. Limpiar TIMEOUT por W1C no recupera una conversión; se utiliza reset coordinado.
+- El runtime descarta publicaciones anteriores a su marca de arranque. El primer dato válido solicita compuertas con mando cero; PRECHARGE mantiene el PR sin acumular. La fase comienza cuando se confirma power_ready. Perder esa confirmación durante RUNNING causa FAULT.
+- `request_gates` y `gates_ready` sustituyen la operación anterior llamada `release_at_valley`. La concesión se hace en el pico y respeta la precarga de los inferiores.
+- `period_ticks` define Timer, verificación de muestras y referencia de 50 Hz. `fs_hz=0` permite el período racional de 6666 ciclos. Timer usa prepare_ticks; no se redondea el reloj a 15000 Hz.
+- La trama v2 mantiene 48 bytes de cabecera, pero transmite reloj de ticks en lugar de frecuencia entera. Python calcula fs=reloj/período. Los casos enteros mantienen v1.
+- `vitis/bsp/main.c` proporciona la entrada SDT y los adaptadores de INTC/MMIO/UART/botones. `board_config.h` permanece con confirmaciones en cero y parámetros pendientes: el modo inicial transmite códigos raw con las cuatro compuertas bloqueadas.
+- La reconstrucción integrada se hace con `scripts/build_nexys4.tcl`; el proyecto base conservado en vivado no incluye por sí solo estas conexiones. El procedimiento, mapa de direcciones, pinout y alcance completo están en la sección 16 de planteamiento.md.
+
+La validación del BD y las pruebas locales son satisfactorias. El objeto de la entrada SDT compila contra cabeceras AMD con configuraciones de prueba; todavía no existe un ELF enlazado al BSP real ni evidencia de ejecución en la Nexys. Faltan medidas físicas, calibración, PR definitivo, protección, límite bootstrap y registrar salida PR/modulación. Los resultados actualizados y los comandos de reproducción están en resultados/adc_firmware/verificacion_local.md.

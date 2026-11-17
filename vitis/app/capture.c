@@ -1,4 +1,5 @@
 #include "capture.h"
+#include "timebase.h"
 #include <float.h>
 #include <math.h>
 #include <string.h>
@@ -16,11 +17,12 @@ uint32_t tdd_crc32_update(uint32_t crc, uint8_t byte)
 bool tdd_capture_init(struct tdd_capture *c, uint32_t fs, uint32_t period,
                       float offset, float gain)
 {
-    if (!c || (uint64_t)fs*period != UINT64_C(100000000) || !fs || !period ||
+    if (!c || !tdd_timebase_valid(fs,period) ||
         !isfinite(offset) || !isfinite(gain) || gain==0.0f) return false;
     memset(c,0,sizeof *c);
     atomic_init(&c->request,0); atomic_init(&c->ready,0); atomic_init(&c->release,0);
-    c->config.fs_hz=fs; c->config.period_ticks=period;
+    c->config.fs_hz=fs ? fs : (TDD_CLOCK_HZ%period ? 0u : TDD_CLOCK_HZ/period);
+    c->config.period_ticks=period;
     c->config.offset_code=offset; c->config.gain_a_per_code=gain;
     c->next_id=1;
     return true;
@@ -99,9 +101,9 @@ bool tdd_tx_begin(struct tdd_capture *c, struct tdd_transmitter *tx)
     tx->bank=ready-1u;
     const struct tdd_metadata *m=&c->bank[tx->bank].frozen;
     memset(tx->header,0,sizeof tx->header);
-    memcpy(tx->header,"TDD4",4); tx->header[4]=1; tx->header[5]=1;
+    memcpy(tx->header,"TDD4",4); tx->header[4]=m->fs_hz ? 1u : 2u; tx->header[5]=1;
     put16(tx->header+6,48); put32(tx->header+8,m->capture_id);
-    put32(tx->header+12,m->count); put32(tx->header+16,m->fs_hz);
+    put32(tx->header+12,m->count); put32(tx->header+16,m->fs_hz ? m->fs_hz : TDD_CLOCK_HZ);
     put32(tx->header+20,m->first_seq); put32(tx->header+24,m->first_ticks);
     put_float(tx->header+28,m->offset_code); put_float(tx->header+32,m->gain_a_per_code);
     put16(tx->header+36,4); put16(tx->header+38,m->flags);

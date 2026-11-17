@@ -1,0 +1,37 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="780" viewBox="0 0 1200 780"><rect x="0" y="0" width="1200" height="780" fill="white" /><style>
+.bloque {
+    fill: white;
+    stroke: black;
+    stroke-width: 2;
+}
+
+.linea {
+    fill: none;
+    stroke: black;
+    stroke-width: 2;
+    stroke-linejoin: miter;
+}
+
+.texto {
+    font-family: Arial, sans-serif;
+    font-size: 20px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.etiqueta {
+    font-family: Arial, sans-serif;
+    font-size: 17px;
+    fill: black;
+    text-anchor: middle;
+}
+
+.titulo {
+    font-family: Arial, sans-serif;
+    font-size: 25px;
+    font-weight: bold;
+    fill: black;
+    text-anchor: middle;
+}
+</style><defs><marker id="flecha" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 1 L 9 5 L 0 9 Z" fill="black" /></marker></defs><text x="600.0" y="50" class="titulo">PRIMER NIVEL: SISTEMA DE CONTROL DE CORRIENTE</text><rect x="420" y="190" width="360" height="300" class="bloque" /><text x="600.0" y="318.0" class="texto">Sistema de</text><text x="600.0" y="347.0" class="texto">Control de</text><text x="600.0" y="376.0" class="texto">Corriente</text><rect x="360" y="635" width="480" height="85" class="bloque" /><text x="600.0" y="684.5" class="texto">Usuario / PC</text><path d="M 190 325 L 420 325" class="linea" marker-end="url(#flecha)" /><text x="305" y="305" class="etiqueta">Fuente DC</text><path d="M 600 100 L 600 190" class="linea" marker-end="url(#flecha)" /><text x="730" y="135" class="etiqueta">Referencia de corriente</text><path d="M 780 325 L 1010 325" class="linea" marker-end="url(#flecha)" /><text x="895" y="305" class="etiqueta">Corriente regulada</text><path d="M 510 490 L 510 635" class="linea" marker-end="url(#flecha)" /><text x="395" y="555" class="etiqueta">Datos de monitoreo</text><path d="M 690 635 L 690 490" class="linea" marker-end="url(#flecha)" /><text x="825" y="565" class="etiqueta">Comandos de usuario</text></svg>

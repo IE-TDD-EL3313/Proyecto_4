@@ -24,6 +24,26 @@ def frame(n=2048, fs=20000, capture_id=1, records=None):
 
 
 class ReceiverTests(unittest.TestCase):
+    def test_v2_exact_clock_period_and_c_interoperability(self):
+        packet=bytearray(frame(n=3))
+        packet[4]=2
+        struct.pack_into("<I",packet,16,100_000_000)
+        struct.pack_into("<I",packet,40,6666)
+        struct.pack_into("<I",packet,len(packet)-4,zlib.crc32(packet[:-4]))
+        capture,=FrameParser().feed(packet,now=0)
+        self.assertEqual(capture.protocol_version,2)
+        self.assertAlmostEqual(capture.fs_hz,100_000_000/6666)
+        self.assertAlmostEqual(capture.duration_s,2*6666/100_000_000)
+        source=ROOT/'build/host/captura_15khz.bin'
+        if source.exists():
+            capture,=FrameParser().feed(source.read_bytes(),now=0)
+            self.assertEqual(capture.period_ticks,6666)
+            self.assertEqual(len(capture.records),2048)
+            self.assertFalse(capture.flags&1)
+        struct.pack_into("<I",packet,16,15000)
+        struct.pack_into("<I",packet,len(packet)-4,zlib.crc32(packet[:-4]))
+        self.assertFalse(FrameParser().feed(packet,now=0))
+
     def test_fragmentation_every_byte_and_magic_in_header(self):
         parser = FrameParser()
         packet = frame(capture_id=int.from_bytes(b"TDD4", "little"))

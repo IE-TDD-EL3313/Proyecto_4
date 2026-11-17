@@ -91,9 +91,24 @@ El sistema está compuesto por los siguientes subsistemas:
 
 ## Instalación y compilación
 
-Las instrucciones de reconstrucción del proyecto en Vivado
-y compilación del software en Vitis se documentarán conforme
-se complete la integración del sistema.
+La integración reproducible actual se construye sobre el proyecto base:
+
+```powershell
+python scripts/test_local.py
+vivado -mode batch -source scripts/build_nexys4.tcl -tclargs validate
+```
+
+El script conecta el ADC personalizado, XADC DRP por evento, PWM, Timer y GPIO.
+`build/nexys4_integrated/project_path.txt` indica el proyecto generado que se
+puede abrir en Vivado. Los modos `synth` y `bitstream` solicitan las etapas
+posteriores; `bitstream` exporta también la XSA al terminar. La validación del
+BD está comprobada; síntesis/implementación de esta integración ampliada y
+ejecución física permanecen pendientes.
+
+La aplicación SDT está en `vitis/bsp/main.c`. Su configuración inicial mantiene
+las compuertas bloqueadas y entrega códigos ADC de diagnóstico sin calibrar.
+Los requisitos para enlazar el BSP, los registros, el pinout y la puesta en
+marcha están desarrollados en la [sección 16 del diseño](docs/diseno/planteamiento.md#16-integración-reproducible-de-nexys-4).
 
 El subsistema de adquisición y el núcleo portable de firmware pueden
 verificarse sin FPGA. Desde la raíz del repositorio, con Python 3.10 o

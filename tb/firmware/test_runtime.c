@@ -8,14 +8,15 @@ struct fixture {
     uint32_t now, seq, sample_ticks, timer_status, tlr;
     unsigned blocks, releases, duty_writes, timer_acks, tick_reads, jump_on_tick;
     uint32_t write_cost;
-    bool marked;
+    bool marked, ready;
+    uint32_t pwm_status;
 };
 static struct tdd_runtime runtime;
 static uint32_t read_adc(void *ctx,uint32_t offset)
 {
     struct fixture *f=ctx;
     if (offset==24) {
-        if (++f->tick_reads==f->jump_on_tick) f->now=4800;
+        if (++f->tick_reads==f->jump_on_tick) f->now=f->sample_ticks+4800;
         return f->now;
     }
     REQUIRE(!(f->timer_status&256u)); // timer acknowledged before reading samples
@@ -47,6 +48,11 @@ static void write_pwm(void *ctx,uint32_t offset,uint32_t value)
 }
 static void block(void *ctx) { ++((struct fixture *)ctx)->blocks; }
 static bool release(void *ctx) { ++((struct fixture *)ctx)->releases; return true; }
+static bool power_ready(void *ctx) { return ((struct fixture *)ctx)->ready; }
+static uint32_t read_pwm(void *ctx,uint32_t offset)
+{
+    REQUIRE(offset==0);return ((struct fixture *)ctx)->pwm_status;
+}
 static void mark(void *ctx,bool high) { ((struct fixture *)ctx)->marked=high; }
 static struct tdd_config config(void)
 {
@@ -58,9 +64,10 @@ static struct tdd_config config(void)
 static void prepare(struct fixture *f)
 {
     memset(f,0,sizeof *f);
-    struct tdd_platform io={.adc={f,read_adc,NULL},.pwm={f,NULL,write_pwm},
+    f->pwm_status=256;
+    struct tdd_platform io={.adc={f,read_adc,NULL},.pwm={f,read_pwm,write_pwm},
         .timer={f,read_timer,write_timer},.context=f,.block_gates=block,
-        .release_at_valley=release,.mark_isr=mark};
+        .request_gates=release,.gates_ready=power_ready,.mark_isr=mark};
     struct tdd_config c=config();
     REQUIRE(!tdd_runtime_prepare(&runtime,&io,&c,5000,200,100,false));
     REQUIRE(f->blocks==1 && !runtime.prepared);
@@ -69,23 +76,39 @@ static void prepare(struct fixture *f)
     REQUIRE(f->tlr==4998 && !(f->timer_status&128u));
     tdd_timer_start(&io.timer);
     f->timer_status|=256u; f->now=1000;f->tick_reads=0;
+    tdd_runtime_irq(&runtime);
+    REQUIRE(runtime.synchronized && runtime.control.state==TDD_WARMUP && f->duty_writes==0);
+    f->seq=1;f->sample_ticks=5000;f->now=6000;f->timer_status|=256;f->tick_reads=0;
 }
 int main(void)
 {
     struct fixture f; prepare(&f);
     tdd_runtime_irq(&runtime);
-    REQUIRE(runtime.control.state==TDD_RUNNING && f.duty_writes==1 && f.releases==1 && !f.marked);
-    REQUIRE(runtime.capture.bank[0].count==1);
-    f.seq=1;f.sample_ticks=5000;f.now=6000;f.timer_status|=256;
+    REQUIRE(runtime.control.state==TDD_PRECHARGE && f.duty_writes==1 && f.releases==1 && !f.marked);
+    REQUIRE(runtime.capture.bank[0].count==0);
+    f.seq=2;f.sample_ticks=10000;f.now=11000;f.timer_status|=256;
     tdd_runtime_irq(&runtime);
     REQUIRE(f.duty_writes==2 && f.releases==1);
+    REQUIRE(runtime.control.state==TDD_PRECHARGE && runtime.control.u1==0);
+    f.ready=true;f.seq=3;f.sample_ticks=15000;f.now=16000;f.timer_status|=256;
+    tdd_runtime_irq(&runtime);
+    REQUIRE(runtime.control.state==TDD_RUNNING && f.duty_writes==3);
+    REQUIRE(runtime.capture.bank[0].count==1 && runtime.control.phase==0);
     f.timer_status|=256; tdd_runtime_irq(&runtime); // repeated sample
-    REQUIRE(runtime.control.state==TDD_FAULT && f.duty_writes==2 && f.blocks>=3);
+    REQUIRE(runtime.control.state==TDD_FAULT && f.duty_writes==3 && f.blocks>=3);
     prepare(&f);f.jump_on_tick=3;tdd_runtime_irq(&runtime);
     REQUIRE(runtime.control.fault==TDD_FAULT_TIME && f.duty_writes==0 && f.releases==0);
     prepare(&f);f.write_cost=4000;tdd_runtime_irq(&runtime);
     REQUIRE(runtime.control.fault==TDD_FAULT_TIME && f.duty_writes==1 && f.releases==0);
     REQUIRE(runtime.capture.stopped);
+    prepare(&f);f.seq=0;f.sample_ticks=0;tdd_runtime_irq(&runtime);
+    REQUIRE(runtime.control.state==TDD_WARMUP && f.duty_writes==0 && f.releases==0);
+    f.now=51000;f.timer_status|=256;tdd_runtime_irq(&runtime);
+    REQUIRE(runtime.control.state==TDD_FAULT && runtime.control.fault==TDD_FAULT_TIME);
+    prepare(&f);f.pwm_status|=64;tdd_runtime_irq(&runtime);
+    REQUIRE(runtime.control.state==TDD_FAULT && f.duty_writes==0);
+    prepare(&f);runtime.control.state=TDD_RUNNING;f.ready=false;tdd_runtime_irq(&runtime);
+    REQUIRE(runtime.control.fault==TDD_FAULT_CONFIG && f.duty_writes==0);
     printf("PASS runtime: %u assertions (timer ack, gate block, pre/post deadlines)\n",checks);
     return 0;
 }

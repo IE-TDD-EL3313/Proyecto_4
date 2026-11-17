@@ -6,7 +6,10 @@ module xadc_axi_lite #(
     parameter integer TIMEOUT_CYCLES = 800,
     parameter [6:0] DRP_ADDRESS = 7'h10
 ) (
-    input wire s_axi_aclk, s_axi_aresetn,
+    (* X_INTERFACE_PARAMETER = "ASSOCIATED_BUSIF s_axi, ASSOCIATED_RESET s_axi_aresetn, FREQ_HZ 100000000" *)
+    input wire s_axi_aclk,
+    input wire s_axi_aresetn,
+    (* X_INTERFACE_PARAMETER = "XIL_INTERFACENAME s_axi, PROTOCOL AXI4LITE, DATA_WIDTH 32, ADDR_WIDTH 8, READ_WRITE_MODE READ_WRITE" *)
     input wire [7:0] s_axi_awaddr,
     input wire s_axi_awvalid,
     output wire s_axi_awready,
@@ -27,13 +30,15 @@ module xadc_axi_lite #(
     input wire pwm_trigger_i, xadc_ready_i, xadc_busy_i, xadc_eoc_i, xadc_drdy_i,
     input wire [15:0] xadc_do_i,
     output wire convst_o, den_o, dwe_o,
+    (* X_INTERFACE_PARAMETER = "POLARITY ACTIVE_HIGH" *) output wire reset_request_o,
     output wire [6:0] daddr_o
 );
     reg aw_held, w_held;
     reg [7:0] awaddr;
     reg [31:0] wdata;
     reg [3:0] wstrb;
-    reg enable, sync_mode, start_sw, clear_overrun, clear_timeout;
+    reg enable, sync_mode, start_sw, clear_overrun, clear_timeout, soft_reset;
+    assign reset_request_o = soft_reset;
     wire valid, busy, overrun, timeout;
     wire [11:0] data;
     wire [31:0] seq, sample_time, ticks;
@@ -42,7 +47,7 @@ module xadc_axi_lite #(
     assign s_axi_arready = !s_axi_rvalid;
     xadc_acquisition #(.CONVST_CYCLES(CONVST_CYCLES), .SETTLE_CYCLES(SETTLE_CYCLES),
         .TIMEOUT_CYCLES(TIMEOUT_CYCLES), .DRP_ADDRESS(DRP_ADDRESS)) acquisition (
-        .clk(s_axi_aclk), .rst_n(s_axi_aresetn), .enable_i(enable), .sync_mode_i(sync_mode),
+        .clk(s_axi_aclk), .rst_n(s_axi_aresetn && !soft_reset), .enable_i(enable), .sync_mode_i(sync_mode),
         .start_sw_i(start_sw), .pwm_trigger_i(pwm_trigger_i),
         .clear_overrun_i(clear_overrun), .clear_timeout_i(clear_timeout),
         .xadc_ready_i(xadc_ready_i), .xadc_busy_i(xadc_busy_i),
@@ -57,8 +62,9 @@ module xadc_axi_lite #(
             s_axi_bvalid<=0; s_axi_bresp<=0;
             s_axi_rvalid<=0; s_axi_rresp<=0; s_axi_rdata<=0;
             enable<=0; sync_mode<=0; start_sw<=0; clear_overrun<=0; clear_timeout<=0;
+            soft_reset<=0;
         end else begin
-            start_sw<=0; clear_overrun<=0; clear_timeout<=0;
+            start_sw<=0; clear_overrun<=0; clear_timeout<=0; soft_reset<=0;
             if (s_axi_awvalid && s_axi_awready) begin aw_held<=1; awaddr<=s_axi_awaddr; end
             if (s_axi_wvalid && s_axi_wready) begin w_held<=1; wdata<=s_axi_wdata; wstrb<=s_axi_wstrb; end
             if (s_axi_bvalid && s_axi_bready) s_axi_bvalid<=0;
@@ -66,7 +72,8 @@ module xadc_axi_lite #(
                 aw_held<=0; w_held<=0; s_axi_bvalid<=1; s_axi_bresp<=0;
                 case (awaddr)
                     8'h00: if (wstrb[0]) begin
-                        if (wdata[1] != sync_mode && (enable || busy)) s_axi_bresp<=2'b10;
+                        if (wdata[3]) begin soft_reset<=1; enable<=0; sync_mode<=0; end
+                        else if (wdata[1] != sync_mode && (enable || busy)) s_axi_bresp<=2'b10;
                         else begin enable<=wdata[0]; sync_mode<=wdata[1]; start_sw<=wdata[2]; end
                     end
                     8'h14: if (wstrb[0]) begin clear_overrun<=wdata[2]; clear_timeout<=wdata[3]; end
@@ -84,6 +91,7 @@ module xadc_axi_lite #(
                     8'h10: s_axi_rdata<=sample_time;
                     8'h14: s_axi_rdata<=0;
                     8'h18: s_axi_rdata<=ticks;
+                    8'h1c: s_axi_rdata<={31'b0,xadc_ready_i};
                     default: begin s_axi_rdata<=0; s_axi_rresp<=2'b10; end
                 endcase
             end

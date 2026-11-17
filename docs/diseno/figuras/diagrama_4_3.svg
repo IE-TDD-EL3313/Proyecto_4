@@ -1,0 +1,37 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="900" viewBox="0 0 1800 900"><rect width="1800" height="900" fill="white" /><style>
+    .bloque {
+        fill: white;
+        stroke: black;
+        stroke-width: 2;
+    }
+
+    .linea {
+        fill: none;
+        stroke: black;
+        stroke-width: 1.8;
+        stroke-linejoin: miter;
+    }
+
+    .texto {
+        font-family: Arial, sans-serif;
+        font-size: 17px;
+        fill: black;
+        text-anchor: middle;
+    }
+
+    .etiqueta {
+        font-family: Arial, sans-serif;
+        font-size: 15px;
+        fill: black;
+        text-anchor: middle;
+    }
+
+    .titulo {
+        font-family: Arial, sans-serif;
+        font-size: 23px;
+        font-weight: bold;
+        fill: black;
+        text-anchor: middle;
+    }
+</style><defs><marker id="flecha" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 1 L 9 5 L 0 9 Z" fill="black" /></marker></defs><text x="900.0" y="45" class="titulo">AXI TIMER Y SISTEMA DE INTERRUPCIONES</text><rect x="65" y="345" width="200" height="100" class="bloque" /><text x="165.0" y="401.0" class="texto">AXI Interconnect</text><rect x="355" y="345" width="205" height="100" class="bloque" /><text x="457.5" y="389.5" class="texto">Interfaz</text><text x="457.5" y="412.5" class="texto">AXI4-Lite</text><rect x="670" y="155" width="230" height="90" class="bloque" /><text x="785.0" y="194.5" class="texto">Registro de control</text><text x="785.0" y="217.5" class="texto">y estado TCSR</text><rect x="670" y="340" width="230" height="90" class="bloque" /><text x="785.0" y="379.5" class="texto">Registro de carga</text><text x="785.0" y="402.5" class="texto">TLR</text><rect x="1080" y="330" width="250" height="110" class="bloque" /><text x="1205.0" y="379.5" class="texto">Lógica de temporización</text><text x="1205.0" y="402.5" class="texto"> y control de conteo</text><rect x="1090" y="575" width="230" height="95" class="bloque" /><text x="1205.0" y="617.0" class="texto">Registro contador</text><text x="1205.0" y="640.0" class="texto">TCR</text><rect x="1490" y="345" width="230" height="105" class="bloque" /><text x="1605.0" y="392.0" class="texto">Lógica de</text><text x="1605.0" y="415.0" class="texto">interrupción</text><path d="M 265 395 L 355 395" class="linea" marker-end="url(#flecha)" /><text x="310" y="380" class="etiqueta">AXI4-Lite</text><path d="M 560 370 L 615 370 L 615 200 L 670 200" class="linea" marker-end="url(#flecha)" /><path d="M 560 415 L 625 415 L 625 385 L 670 385" class="linea" marker-end="url(#flecha)" /><path d="M 900 200 L 970 200 L 970 355 L 1080 355" class="linea" marker-end="url(#flecha)" /><path d="M 900 385 L 1080 385" class="linea" marker-end="url(#flecha)" /><path d="M 1120 260 L 1160 260 L 1160 330" class="linea" marker-end="url(#flecha)" /><text x="1129" y="245" class="etiqueta">clk</text><path d="M 1230 280 L 1270 280 L 1270 330" class="linea" marker-end="url(#flecha)" /><text x="1239" y="265" class="etiqueta">reset</text><path d="M 1205 440 L 1205 575" class="linea" marker-end="url(#flecha)" /><text x="1280" y="513" class="etiqueta">Cuenta actual</text><path d="M 1090 622 L 1010 622 L 1010 785 L 455 785 L 455 445" class="linea" marker-end="url(#flecha)" /><text x="750" y="770" class="etiqueta">Lectura TCR mediante AXI</text><path d="M 1330 400 L 1490 400" class="linea" marker-end="url(#flecha)" /><text x="1410" y="385" class="etiqueta">Fin de período</text><path d="M 785 155 L 785 105 L 1605 105 L 1605 345" class="linea" marker-end="url(#flecha)" /><text x="1180" y="90" class="etiqueta">Habilitación de interrupción (TCSR)</text><path d="M 1720 400 L 1775 400" class="linea" marker-end="url(#flecha)" /><text x="1755" y="365" class="etiqueta">timer_irq</text></svg>

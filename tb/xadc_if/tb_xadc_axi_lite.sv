@@ -14,7 +14,7 @@ module tb_xadc_axi_lite;
     reg late_eoc=0, late_drdy=0;
     reg respond=1, respond_drp=1;
     reg [15:0] result_word=16'habc0;
-    wire convst,den,dwe; wire [6:0] daddr;
+    wire convst,den,dwe,reset_request; wire [6:0] daddr;
     integer conversions=0, den_count=0, conv_countdown=0, drp_countdown=0;
     reg old_convst=0, old_den=0;
     integer checks=0, read_hold_cycles=3, high_cycles=0;
@@ -28,12 +28,13 @@ module tb_xadc_axi_lite;
         .s_axi_rdata(rdata),.s_axi_rresp(rresp),.s_axi_rvalid(rvalid),.s_axi_rready(rready),
         .pwm_trigger_i(trigger),.xadc_ready_i(ready),.xadc_busy_i(model_busy),
         .xadc_eoc_i(model_eoc|late_eoc),.xadc_drdy_i(model_drdy|late_drdy),
-        .xadc_do_i(result_word),.convst_o(convst),.den_o(den),.dwe_o(dwe),.daddr_o(daddr));
+        .xadc_do_i(result_word),.convst_o(convst),.den_o(den),.dwe_o(dwe),.daddr_o(daddr),
+        .reset_request_o(reset_request));
 
     // Behavioral DRP responder only; this is not the AMD analog simulation model.
     always @(negedge clk) begin
         model_eoc=0; model_drdy=0;
-        if (!rst_n) begin
+        if (!rst_n || reset_request) begin
             model_busy=0; conv_countdown=0; drp_countdown=0; old_convst=0; old_den=0; high_cycles=0;
         end else begin
             if (convst && !old_convst) begin
@@ -127,7 +128,8 @@ module tb_xadc_axi_lite;
         read_reg('h00,value,0); check(value==0,"upper byte ignored");
         write_reg('h08,99,15,0,0,2);
         write_reg('h01,99,15,0,0,2);
-        read_reg('h1c,value,2); read_reg('h09,value,2);
+        read_reg('h1c,value,0); check(value==ready,"READY readback");
+        read_reg('h20,value,2); read_reg('h09,value,2);
         write_reg('h00,5,1,0,0,0); // enable + START_SW same write
         repeat(30) @(negedge clk);
         read_reg('h08,value,0); check(value=='habc,"12-bit alignment");
@@ -192,6 +194,12 @@ module tb_xadc_axi_lite;
         write_reg('h00,0,1,0,0,0);
         write_reg('h00,2,1,0,0,2);
         read_reg('h00,value,0); check(value==0,"busy rejects mode change with ENABLE already zero");
+        respond_drp=1;
+        write_reg('h00,8,1,0,0,0); repeat(8) @(negedge clk);
+        read_reg('h04,value,0); check(value==0,"software reset clears locked ERROR");
+        read_reg('h0c,value,0); check(value==0,"software reset clears old publication");
+        write_reg('h00,5,1,0,0,0); repeat(30) @(negedge clk);
+        read_reg('h0c,value,0); check(value==1,"fresh conversion after coordinated software reset");
         respond_drp=1; reset_dut();
         write_reg('h00,5,1,0,0,0); reset_dut(); repeat(25) @(negedge clk);
         read_reg('h0c,value,0); check(value==0,"reset during conversion cancels publication");
