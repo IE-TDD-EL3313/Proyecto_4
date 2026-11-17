@@ -1,5 +1,6 @@
 #include "control_core.h"
 #include "reference_lut.h"
+#include "timebase.h"
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -38,7 +39,7 @@ bool tdd_to_q15(float volts, float vdc, float limit, int16_t *q, bool *saturated
 
 bool tdd_config_valid(const struct tdd_config *c)
 {
-    if (!c || c->fs_hz < 100u || (uint64_t)c->fs_hz*c->period_ticks != UINT64_C(100000000) ||
+    if (!c || !tdd_timebase_valid(c->fs_hz,c->period_ticks) ||
         c->age_min_ticks > c->age_max_ticks || c->age_max_ticks >= c->period_ticks ||
         c->warmup_ticks < c->period_ticks || c->warmup_ticks >= UINT32_C(0x80000000) ||
         c->raw_min >= c->raw_max || c->raw_max > 4095u ||
@@ -63,7 +64,8 @@ bool tdd_control_init(struct tdd_control *ctl, const struct tdd_config *cfg, uin
     ctl->cfg = *cfg;
     ctl->state = TDD_WARMUP; ctl->fault = TDD_FAULT_NONE;
     ctl->start_ticks = now;
-    ctl->phase_step = (uint32_t)(((UINT64_C(50)<<32)+cfg->fs_hz/2u)/cfg->fs_hz);
+    ctl->phase_step = (uint32_t)(((UINT64_C(50)<<32)*cfg->period_ticks+
+                                TDD_CLOCK_HZ/2u)/TDD_CLOCK_HZ);
     return true;
 }
 
@@ -88,7 +90,7 @@ bool tdd_control_step(struct tdd_control *ctl, const struct tdd_sample *s,
     if (!ctl || !out) return false;
     memset(out,0,sizeof *out);
     if (ctl->state == TDD_FAULT) return false;
-    if (ctl->state == TDD_WARMUP && now-ctl->start_ticks >= ctl->cfg.warmup_ticks)
+    if (ctl->state != TDD_RUNNING && now-ctl->start_ticks >= ctl->cfg.warmup_ticks)
         return fail(ctl,TDD_FAULT_TIME,out);
     if (!s || (s->status & 12u)) return fail(ctl,TDD_FAULT_ADC,out);
     if (!(s->status & 1u)) {
@@ -101,10 +103,14 @@ bool tdd_control_step(struct tdd_control *ctl, const struct tdd_sample *s,
         return fail(ctl,TDD_FAULT_TIME,out);
     if (s->raw < ctl->cfg.raw_min || s->raw > ctl->cfg.raw_max)
         return fail(ctl,TDD_FAULT_CURRENT,out);
-    if (ctl->state == TDD_RUNNING) {
+    if (ctl->state == TDD_RUNNING || ctl->state == TDD_PRECHARGE) {
         if (s->seq != ctl->last_seq+1u) return fail(ctl,TDD_FAULT_SEQUENCE,out);
         if (s->ticks-ctl->last_ticks != ctl->cfg.period_ticks)
             return fail(ctl,TDD_FAULT_TIME,out);
+        if (ctl->state == TDD_PRECHARGE) {
+            ctl->last_seq=s->seq; ctl->last_ticks=s->ticks;
+            return true; /* zero duty, no PR state accumulation during precharge */
+        }
         ctl->phase += ctl->phase_step;
     } else {
         ctl->state = TDD_RUNNING;

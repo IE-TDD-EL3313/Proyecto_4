@@ -1,0 +1,36 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="760" viewBox="0 0 1500 760"><rect x="0" y="0" width="1500" height="760" fill="white" /><style>
+    .bloque {
+        fill: white;
+        stroke: black;
+        stroke-width: 2;
+    }
+
+    .linea {
+        fill: none;
+        stroke: black;
+        stroke-width: 1.8;
+        stroke-linejoin: miter;
+    }
+
+    .texto {
+        font-family: Arial, sans-serif;
+        font-size: 17px;
+        fill: black;
+        text-anchor: middle;
+    }
+
+    .etiqueta {
+        font-family: Arial, sans-serif;
+        font-size: 15px;
+        fill: black;
+        text-anchor: middle;
+    }
+
+    .titulo {
+        font-family: Arial, sans-serif;
+        font-size: 23px;
+        font-weight: bold;
+        text-anchor: middle;
+    }
+</style><defs><marker id="flecha" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 1 L 9 5 L 0 9 Z" fill="black" /></marker></defs><text x="750.0" y="45" class="titulo">MICROBLAZE V Y MEMORIA LOCAL</text><rect x="250" y="290" width="250" height="155" class="bloque" /><text x="375.0" y="350.5" class="texto">MicroBlaze V</text><text x="375.0" y="373.5" class="texto">CPU RISC-V</text><text x="375.0" y="396.5" class="texto">I-Cache: 8 KiB</text><rect x="700" y="100" width="190" height="80" class="bloque" /><text x="795.0" y="134.5" class="texto">Controlador</text><text x="795.0" y="157.5" class="texto">ILMB BRAM</text><rect x="700" y="240" width="190" height="80" class="bloque" /><text x="795.0" y="274.5" class="texto">Controlador</text><text x="795.0" y="297.5" class="texto">DLMB BRAM</text><rect x="1110" y="170" width="220" height="100" class="bloque" /><text x="1220.0" y="214.5" class="texto">Memoria BRAM</text><text x="1220.0" y="237.5" class="texto">32 KiB</text><rect x="700" y="400" width="190" height="80" class="bloque" /><text x="795.0" y="446.0" class="texto">AXI Interconnect</text><rect x="1110" y="400" width="220" height="80" class="bloque" /><text x="1220.0" y="446.0" class="texto">Periféricos AXI</text><rect x="700" y="565" width="190" height="80" class="bloque" /><text x="795.0" y="599.5" class="texto">Módulo de</text><text x="795.0" y="622.5" class="texto">depuración MDM</text><rect x="1110" y="565" width="220" height="80" class="bloque" /><text x="1220.0" y="599.5" class="texto">Interfaz de</text><text x="1220.0" y="622.5" class="texto">depuración JTAG</text><path d="M 90 320 L 250 320" class="linea" marker-end="url(#flecha)" /><text x="115" y="308" class="etiqueta">clk</text><path d="M 90 367 L 250 367" class="linea" marker-end="url(#flecha)" /><text x="115" y="355" class="etiqueta">reset</text><path d="M 90 415 L 250 415" class="linea" marker-end="url(#flecha)" /><text x="115" y="403" class="etiqueta">irq</text><path d="M 500 315 L 575 315 L 575 140 L 700 140" class="linea" marker-end="url(#flecha)" /><text x="635" y="128" class="etiqueta">ILMB</text><path d="M 500 345 L 620 345 L 620 280 L 700 280" class="linea" marker-end="url(#flecha)" /><text x="660" y="267" class="etiqueta">DLMB</text><path d="M 890 140 L 990 140 L 990 195 L 1110 195" class="linea" marker-end="url(#flecha)" /><text x="965" y="125" class="etiqueta">Puerto A</text><path d="M 890 280 L 1030 280 L 1030 245 L 1110 245" class="linea" marker-end="url(#flecha)" /><text x="970" y="300" class="etiqueta">Puerto B</text><path d="M 500 390 L 600 390 L 600 440 L 700 440" class="linea" marker-end="url(#flecha)" /><text x="650" y="425" class="etiqueta">M_AXI</text><path d="M 890 440 L 1110 440" class="linea" marker-end="url(#flecha)" /><text x="1000" y="425" class="etiqueta">AXI4-Lite</text><path d="M 375 445 L 375 605 L 700 605" class="linea" marker-end="url(#flecha)" /><text x="620" y="590" class="etiqueta">DEBUG</text><path d="M 890 605 L 1110 605" class="linea" marker-end="url(#flecha)" /></svg>

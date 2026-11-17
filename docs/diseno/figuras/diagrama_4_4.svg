@@ -1,0 +1,44 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1100" viewBox="0 0 2400 1100"><rect x="0" y="0" width="2400" height="1100" fill="white" /><style>
+    .bloque {
+        fill: white;
+        stroke: black;
+        stroke-width: 2;
+    }
+
+    .linea {
+        fill: none;
+        stroke: black;
+        stroke-width: 2;
+        stroke-linejoin: miter;
+    }
+
+    .texto {
+        font-family: Arial, sans-serif;
+        font-size: 20px;
+        fill: black;
+        text-anchor: middle;
+    }
+
+    .etiqueta {
+        font-family: Arial, sans-serif;
+        font-size: 17px;
+        fill: black;
+        text-anchor: middle;
+    }
+
+    .titulo {
+        font-family: Arial, sans-serif;
+        font-size: 28px;
+        font-weight: bold;
+        fill: black;
+        text-anchor: middle;
+    }
+
+    .nota {
+        font-family: Arial, sans-serif;
+        font-size: 16px;
+        fill: black;
+        text-anchor: middle;
+    }
+</style><defs><marker id="flecha" markerWidth="11" markerHeight="11" refX="10" refY="5.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 1 L 10 5.5 L 0 10 Z" fill="black" /></marker></defs><text x="1200.0" y="55" class="titulo">CONTROLADOR PWM UNIPOLAR CON TIEMPO MUERTO</text><rect x="90" y="440" width="235" height="115" class="bloque" /><text x="207.5" y="491.5" class="texto">Interfaz</text><text x="207.5" y="517.5" class="texto">AXI4-Lite</text><rect x="455" y="180" width="255" height="100" class="bloque" /><text x="582.5" y="224.0" class="texto">Registro</text><text x="582.5" y="250.0" class="texto">CONTROL / STATUS</text><rect x="455" y="535" width="255" height="100" class="bloque" /><text x="582.5" y="579.0" class="texto">Registro</text><text x="582.5" y="605.0" class="texto">DUTY_REF</text><rect x="820" y="180" width="250" height="100" class="bloque" /><text x="945.0" y="224.0" class="texto">Selector de período</text><text x="945.0" y="250.0" class="texto">3 frecuencias</text><rect x="1160" y="180" width="245" height="100" class="bloque" /><text x="1282.5" y="224.0" class="texto">Contador PWM</text><text x="1282.5" y="250.0" class="texto">y base temporal</text><rect x="820" y="535" width="250" height="100" class="bloque" /><text x="945.0" y="579.0" class="texto">Saturación</text><text x="945.0" y="605.0" class="texto">de referencia</text><rect x="1160" y="535" width="245" height="100" class="bloque" /><text x="1282.5" y="579.0" class="texto">Registro de duty</text><text x="1282.5" y="605.0" class="texto">sincronizado</text><rect x="1530" y="420" width="255" height="135" class="bloque" /><text x="1657.5" y="468.5" class="texto">Comparadores PWM</text><text x="1657.5" y="494.5" class="texto">unipolares</text><text x="1657.5" y="520.5" class="texto">ramas A y B</text><rect x="1900" y="420" width="280" height="135" class="bloque" /><text x="2040.0" y="468.5" class="texto">Tiempo muerto,</text><text x="2040.0" y="494.5" class="texto">habilitación y</text><text x="2040.0" y="520.5" class="texto">estado seguro</text><rect x="1530" y="800" width="255" height="100" class="bloque" /><text x="1657.5" y="844.0" class="texto">Generador de</text><text x="1657.5" y="870.0" class="texto">disparo ADC</text><path d="M 25 497 L 90 497" class="linea" marker-end="url(#flecha)" /><text x="50" y="480" class="etiqueta">AXI4-Lite</text><path d="M 325 470 L 385 470 L 385 230 L 455 230" class="linea" marker-end="url(#flecha)" /><text x="417" y="215" class="etiqueta">control</text><path d="M 325 525 L 400 525 L 400 585 L 455 585" class="linea" marker-end="url(#flecha)" /><text x="425" y="570" class="etiqueta">duty</text><path d="M 710 230 L 820 230" class="linea" marker-end="url(#flecha)" /><text x="765" y="212" class="etiqueta">freq_sel</text><path d="M 1070 230 L 1160 230" class="linea" marker-end="url(#flecha)" /><text x="1115" y="212" class="etiqueta">período</text><path d="M 710 585 L 820 585" class="linea" marker-end="url(#flecha)" /><text x="765" y="567" class="etiqueta">duty_ref</text><path d="M 1070 585 L 1160 585" class="linea" marker-end="url(#flecha)" /><text x="1115" y="567" class="etiqueta">duty_sat</text><path d="M 1270 280 L 1270 535" class="linea" marker-end="url(#flecha)" /><text x="1150" y="390" class="etiqueta">evento de actualización</text><path d="M 1405 225 L 1470 225 L 1470 455 L 1530 455" class="linea" marker-end="url(#flecha)" /><text x="1460" y="205" class="etiqueta">cuenta PWM</text><path d="M 1405 585 L 1495 585 L 1495 515 L 1530 515" class="linea" marker-end="url(#flecha)" /><text x="1510" y="610" class="etiqueta">duty activo</text><path d="M 1785 487 L 1900 487" class="linea" marker-end="url(#flecha)" /><text x="1840" y="469" class="etiqueta">PWM bruto</text><path d="M 580 180 L 580 100 L 2040 100 L 2040 420" class="linea" marker-end="url(#flecha)" /><text x="1300" y="85" class="etiqueta">pwm_enable</text><path d="M 2180 445 L 2320 445" class="linea" marker-end="url(#flecha)" /><text x="2250" y="435" class="etiqueta">pwm_ah_o</text><path d="M 2180 473 L 2320 473" class="linea" marker-end="url(#flecha)" /><text x="2250" y="463" class="etiqueta">pwm_al_o</text><path d="M 2180 501 L 2320 501" class="linea" marker-end="url(#flecha)" /><text x="2250" y="491" class="etiqueta">pwm_bh_o</text><path d="M 2180 529 L 2320 529" class="linea" marker-end="url(#flecha)" /><text x="2250" y="519" class="etiqueta">pwm_bl_o</text><path d="M 1405 260 L 1440 260 L 1440 850 L 1530 850" class="linea" marker-end="url(#flecha)" /><text x="1440" y="880" class="etiqueta">evento de muestreo</text><path d="M 1785 850 L 1950 850" class="linea" marker-end="url(#flecha)" /><text x="1860" y="832" class="etiqueta">pwm_trigger_o</text></svg>

@@ -3,12 +3,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-enum tdd_state { TDD_WARMUP, TDD_RUNNING, TDD_FAULT };
+enum tdd_state { TDD_WARMUP, TDD_RUNNING, TDD_FAULT, TDD_PRECHARGE };
 enum tdd_fault { TDD_FAULT_NONE, TDD_FAULT_CONFIG, TDD_FAULT_ADC,
     TDD_FAULT_SEQUENCE, TDD_FAULT_TIME, TDD_FAULT_CURRENT, TDD_FAULT_NUMERIC,
     TDD_FAULT_SATURATION };
 struct tdd_sample { uint32_t seq, ticks, status; uint16_t raw; };
 struct tdd_config {
+    /* fs_hz=0 for a non-integer rate; period_ticks always defines sample time. */
     uint32_t fs_hz, period_ticks, age_min_ticks, age_max_ticks, warmup_ticks;
     uint16_t raw_min, raw_max, deadtime_cycles;
     float offset_code, gain_a_per_code, vdc, m_max, amplitude_a;

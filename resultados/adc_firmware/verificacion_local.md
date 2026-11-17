@@ -1,5 +1,40 @@
 # Verificación local de adquisición y firmware
 
+## Actualización de integración del 16 de noviembre de 2026
+
+La versión actual incorpora la arquitectura MicroBlaze V y PWM de `develop` (`98b0758`) y el arranque coordinado de adquisición/control. Los resultados de noviembre 10/11 que siguen se conservan como antecedentes; no representan síntesis ni ejecución física de esta versión ampliada.
+
+| Verificación actual | Resultado |
+|---|---|
+| AXI/ADC y reset coordinado | 312 comprobaciones satisfactorias |
+| Núcleo C y captura | 64508 comprobaciones satisfactorias |
+| Runtime, precarga, muestra previa y fallas | 160 comprobaciones satisfactorias |
+| Períodos exactos, fase y protocolo v2 | 44467 comprobaciones satisfactorias |
+| PWM y contrato de armado | 77 comprobaciones satisfactorias |
+| RTL conectado con ADC/Timer sintéticos | 106 comprobaciones; períodos 10000/6666/5000 |
+| Publicaciones RTL reproducidas mediante runtime C | 127 comprobaciones; WARMUP/PRECHARGE/RUNNING |
+| Receptor Python | 12 pruebas satisfactorias, incluyendo trama v2 producida por C |
+| Objetos RV32IMC/ILP32 | Cinco objetos; suma de text: 7231 bytes, sin bibliotecas ni aplicación enlazada |
+| Entrada SDT de placa | Compila contra cabeceras AMD con configuración de prueba explícita; no es un BSP/ELF real |
+| BD integrado en Vivado 2026.1 | Validado y wrapper generado el 15 de noviembre; no se ejecutó síntesis/implementación de esta ampliación |
+
+Los contadores de comprobaciones incluyen repeticiones de secuencias y no representan esa cantidad de casos independientes. La simulación utiliza respuestas ADC digitales, sin modelo analógico AMD ni procesador ejecutando firmware. El pin de LED0 de la Nexys 4 original se contrastó con el Master XDC incluido y se fija en T8.
+
+Reproducción desde la raíz:
+
+```powershell
+python scripts/test_local.py
+python scripts/cross_compile_core.py --toolchain-dir C:/AMDDesignTools/2026.1/Vitis/gnu/riscv/nt/bin
+python scripts/check_bsp_api.py
+vivado -mode batch -source scripts/build_nexys4.tcl -tclargs validate
+```
+
+El script de integración conecta el wrapper ADC a XADC DRP por evento en VAUX3 y dirige Timer al armado PWM. `project_path.txt` identifica la copia temporal del proyecto en `build/nexys4_integrated/`. Hay advertencias de conexión individual DRP/GPIO y dirección BRAM; su aceptación final requiere revisar síntesis, implementación y mapa de memoria. Los modos synth/bitstream están preparados para continuar ese trabajo.
+
+El modo predeterminado de `vitis/bsp/main.c` es diagnóstico con potencia bloqueada. Siguen pendientes calibración/polaridad del sensor, coeficientes PR para 24 V y L=30 mH, máximo de modulación, actuación del interruptor manual, BSP/ELF, enlace de memoria y medidas físicas de tiempos/UART. El histórico actual conserva ADC y referencia; salida PR y modulación del Issue #15 no están incorporadas todavía.
+
+## Antecedentes del 10 y 11 de noviembre
+
 Fecha: 10 de noviembre de 2026. Alcance: RTL aislado, firmware portable, modelo RL sintético y receptor de capturas. No se utilizó una FPGA ni una etapa de potencia conectada.
 
 Revalidación del 11 de noviembre de 2026: se ejecutaron nuevamente `test_local.py` y `cross_compile_core.py`, con los mismos resultados PASS y recuentos de la tabla. Las fuentes RTL actuales coinciden por SHA-256 con las copias utilizadas en la síntesis Nexys 4 del día 10; no se presenta esa síntesis como una nueva ejecución del día 11.

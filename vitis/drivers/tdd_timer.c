@@ -3,12 +3,20 @@ enum { TCSR=0, TLR=4, DOWN=2, GENERATE=4, RELOAD=16, LOAD=32,
        IRQ_ENABLE=64, ENABLE=128, IRQ_PENDING=256 };
 bool tdd_timer_prepare(const struct tdd_bus *bus, uint32_t fs_hz)
 {
-    if (!bus || !bus->write32 || !fs_hz || 100000000u%fs_hz || 100000000u/fs_hz<3u)
-        return false;
+    if (!fs_hz || 100000000u%fs_hz) return false;
+    return tdd_timer_prepare_ticks(bus,100000000u/fs_hz);
+}
+void tdd_timer_stop(const struct tdd_bus *bus)
+{
+    if (bus && bus->write32) bus->write32(bus->context,TCSR,0);
+}
+bool tdd_timer_prepare_ticks(const struct tdd_bus *bus, uint32_t period_ticks)
+{
+    if (!bus || !bus->write32 || period_ticks<3u) return false;
     uint32_t options=DOWN|GENERATE|RELOAD;
     bus->write32(bus->context,TCSR,0);
     bus->write32(bus->context,0x10u,0); // auxiliary counter IRQ disabled
-    bus->write32(bus->context,TLR,100000000u/fs_hz-2u);
+    bus->write32(bus->context,TLR,period_ticks-2u);
     bus->write32(bus->context,TCSR,options|LOAD|IRQ_PENDING);
     bus->write32(bus->context,TCSR,options);
     return true;

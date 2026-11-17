@@ -1,4 +1,4 @@
-"""Decode bounded TDD4 v1 captures from a binary file or an optional serial port."""
+"""Decode bounded TDD4 v1/v2 captures; v2 represents exact clock/period rates."""
 from __future__ import annotations
 
 import argparse
@@ -22,7 +22,7 @@ MAX_FRAME = 48 + 4 * MAX_SAMPLES + 4
 @dataclass(frozen=True)
 class Capture:
     capture_id: int
-    fs_hz: int
+    fs_hz: float
     first_seq: int
     first_ticks: int
     offset_code: float
@@ -30,6 +30,7 @@ class Capture:
     flags: int
     period_ticks: int
     records: tuple[tuple[int, int], ...]
+    protocol_version: int = 1
 
     @property
     def duration_s(self) -> float:
@@ -39,11 +40,13 @@ class Capture:
 def inspect_header(data: bytes | bytearray) -> tuple:
     fields = HEADER.unpack_from(data)
     magic, version, kind, header_bytes, _, n, fs, _, _, offset, gain, size, flags, period, payload = fields
-    if (magic, version, kind, header_bytes, size) != (MAGIC, 1, 1, 48, 4):
+    if (magic, kind, header_bytes, size) != (MAGIC, 1, 48, 4) or version not in (1, 2):
         raise ValueError("cabecera o versión no compatible")
     if not 1 <= n <= MAX_SAMPLES or payload != n * 4:
         raise ValueError("longitud de captura inválida")
-    if fs <= 0 or period <= 0 or fs * period != 100_000_000:
+    if (not 3 <= period <= 1_000_000 or
+            (version == 1 and (fs <= 0 or fs * period != 100_000_000)) or
+            (version == 2 and fs != 100_000_000)):
         raise ValueError("frecuencia y período de ticks incompatibles")
     if not math.isfinite(offset) or not math.isfinite(gain) or gain == 0:
         raise ValueError("calibración inválida")
@@ -100,7 +103,9 @@ class FrameParser:
                 del self.buffer[0]
                 self.started = None
                 continue
-            found.append(Capture(capture_id, fs, seq, ticks, offset, gain, flags, period, records))
+            version = fields[1]
+            found.append(Capture(capture_id, fs if version == 1 else fs / period,
+                                 seq, ticks, offset, gain, flags, period, records, version))
             del self.buffer[:total]
             self.started = None
         return found
