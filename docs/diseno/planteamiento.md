@@ -605,7 +605,7 @@ Como la modulación es unipolar, cada transistor conmuta a $f_{sw}$, pero la ten
 
 Cuando `enable` pasa a 1, el contador arranca desde 0 y `running` se pone en 1. Cuando `enable` pasa a 0, el contador se detiene, `running` vuelve a 0 y las compuertas se apagan de inmediato.
 
-El arranque requiere `sync_arm=1`, portadora activa y compuertas bloqueadas. El primer flanco de `sync_start_i` carga `sync_phase` subiendo y establece `sync_done`; los pulsos siguientes se ignoran hasta detener y rearmar. Con fase 1000, el evento del Timer ocurre aproximadamente 10 µs después del valle; la entrada a la ISR añade su latencia. El trigger dirigido al ADC permanece bloqueado antes de `sync_done`. La fase solo se escribe con PWM detenido y debe ser menor que N; una escritura inválida devuelve SLVERR.
+Cuando llega un flanco de `sync_start_i` y las compuertas están bloqueadas, el contador salta a `sync_phase` y sigue subiendo desde ahí. Con el valor de reset (1000) y a 20 kHz, la interrupción del Timer queda 10 µs después del valle, como pide la sección 9.2.3. Como el Timer y el PWM usan el mismo reloj y el mismo período de 5000 ciclos, los pulsos siguientes de `generateout0` llegan justo cuando la portadora ya vale 1000, así que la recarga no produce saltos ni deriva.
 
 #### Diseño y justificación técnica
 
@@ -833,7 +833,7 @@ START_SW se utiliza en diagnóstico, con SYNC_MODE=0. Durante el control, SYNC_M
 
 Las solicitudes con ENABLE=0 se ignoran sin error. SYNC_MODE solo se cambia cuando el ENABLE previo a la escritura es 0 y BUSY=0. Primero se deshabilitan nuevas solicitudes y se espera el fin de la operación aceptada, y después se cambia el modo. Un cambio de modo con ENABLE previo=1 o BUSY=1 devuelve SLVERR y conserva CTRL. ENABLE y START_SW pueden escribirse juntos en diagnóstico: la aceptación usa el ENABLE resultante. No hay cola de solicitudes.
 
-Tras timeout, la FSM queda en ERROR: BUSY permanece alto, no se aceptan disparos ni se publican respuestas tardías. W1C borra el indicador, pero no rearma. El bit RESET de ADC_CTRL limpia la adquisición y solicita reset del XADC mediante xadc_startup_guard. La recuperación mantiene potencia bloqueada y espera ADC_READY antes de rearmar.
+Tras timeout, la FSM queda en ERROR bloqueado: no emite CONVST/DEN ni acepta disparos y descarta EOC/DRDY tardíos. Borrar TIMEOUT por W1C no rearma la FSM; BUSY permanece en 1 en ERROR. Se exige reset coordinado del wrapper y XADC, con potencia bloqueada, para volver a WARMUP. Esto evita asociar una respuesta vieja a una solicitud nueva. La integración de plataforma debe definir cómo aplicar ese reset; el mapa actual no propone un bit de reset software.
 
 Reset domina todos los estados, cancela la publicación pendiente y limpia CTRL/VALID/errores/DATA/SEQ/TIME/TICKS. La admisión permanece bloqueada hasta terminar la inicialización del XADC y el asentamiento analógico. El tiempo tras reset y el divisor ADCCLK se justifican con la hoja de datos del FPGA seleccionado; BUSY=0 inmediatamente tras reset no basta para admitir una conversión.
 
@@ -921,13 +921,9 @@ Los offsets son relativos a la dirección base que asigne Vivado. Los registros 
 | 2:1 | `freq_sel` | R/W | `00` = 10 kHz, `01` = 15 kHz, `10` = 20 kHz, `11` = 20 kHz. |
 | 3 | `running` | Solo lectura | 1 si el generador está activo. |
 | 4 | `gates_en` | R/W | 1 libera las compuertas en el siguiente pico, con 20 µs de precarga del bootstrap. 0 las apaga de inmediato. Una falla lo borra. |
-| 5 | `gates_on` | Solo lectura | Habilitación concedida en el pico; puede estar ejecutando precarga. |
+| 5 | `gates_on` | Solo lectura | 1 si las compuertas están conmutando. |
 | 6 | `fault` | Solo lectura | Estado de la entrada `fault_i`. |
-| 7 | `sync_arm` | R/W | Arma el primer pulso con enable=1 y gates_en=0; se borra al completar. |
-| 8 | `sync_done` | Solo lectura | Sincronización aceptada; se limpia al detener PWM. |
-| 9 | `precharge` | Solo lectura | Precarga del bootstrap en curso. |
-| 10 | `power_ready` | Solo lectura | Compuertas habilitadas, sin falla y precarga terminada. |
-| 31:11 | — | Reservado | Se leen como 0. |
+| 31:7 | — | Reservado | Se leen como 0. |
 
 **0x04 — DUTY_REF** (reset `0x0000_0000`)
 
@@ -952,7 +948,7 @@ Los offsets son relativos a la dirección base que asigne Vivado. Los registros 
 
 Los cambios en `freq_sel`, `duty_ref` y `dead_time` se aplican en el siguiente valle de la portadora.
 
-Secuencia: detener Timer/PWM, resetear ADC/XADC y esperar READY; escribir DUTY_REF=0, DEADTIME y SYNC_PHASE; habilitar ADC sincronizado; escribir enable=1, gates_en=0 y sync_arm=1; arrancar Timer tras registrar INTC. La primera ISR verifica sync_done y fija la marca de arranque. WARMUP descarta publicaciones anteriores a esa marca. La primera muestra válida prepara mando cero y solicita gates_en: se entra en PRECHARGE. Solo power_ready permite RUNNING; durante precarga no se acumula el PR. Bloquear gates_en conserva la portadora.
+Secuencia de uso desde el firmware: escribir DUTY_REF, DEADTIME y SYNC_PHASE; escribir CTRL_STATUS con `enable` = 1 y `gates_en` = 0 (WARMUP); arrancar el AXI Timer, cuyo primer `generateout0` alinea la portadora; y al pasar a RUNNING, escribir `gates_en` = 1. Para detener el puente H basta con `gates_en` = 0, sin perder la sincronización.
 
 ### 8.3 Registros de la interfaz ADC/XADC
 
@@ -960,18 +956,17 @@ Secuencia: detener Timer/PWM, resetear ADC/XADC y esperar READY; escribir DUTY_R
 
 Todos los offsets son relativos a ADC_BASE. Los bits reservados se leen como cero. Tras reset, ENABLE=0, SYNC_MODE=0, VALID=0, SEQ=0 y errores=0. DATA/TIME no se consideran válidos hasta VALID=1.
 
-Los registros de adquisición reinician a cero. ADC_TICKS incrementa con independencia de ENABLE. START_SW, RESET y ERR_CLEAR se leen como cero; leer STATUS no limpia flags. ADC_READY refleja disponibilidad externa después de la espera de arranque.
+Todos los registros y bits definidos reinician a cero. ADC_TICKS incrementa desde el ciclo posterior a retirar reset, independientemente de ENABLE. START_SW y ERR_CLEAR se leen siempre como cero; leer STATUS no limpia flags.
 
 | Offset | Registro | Acceso | Bits y semántica |
 |---|---|---|---|
-| 0x00 | ADC_CTRL | R/W | bit0 ENABLE; bit1 SYNC_MODE; bit2 START_SW; bit3 RESET coordinado. Los pulsos se leen como cero. |
+| 0x00 | ADC_CTRL | R/W | bit0 ENABLE; bit1 SYNC_MODE; bit2 START_SW, escritura de pulso y lectura cero |
 | 0x04 | ADC_STATUS | RO | bit0 VALID; bit1 BUSY de la interfaz; bit2 OVERRUN; bit3 TIMEOUT |
 | 0x08 | ADC_DATA | RO | bits[11:0] raw12; bits[31:12]=0 |
 | 0x0C | ADC_SEQ | RO | Contador que incrementa al publicar una muestra |
 | 0x10 | ADC_TIME | RO | Tiempo del disparo de la muestra publicada, módulo 2^32 |
 | 0x14 | ADC_ERR_CLEAR | WO | Escribir 1 en bit2/3 borra OVERRUN/TIMEOUT; leer devuelve cero |
 | 0x18 | ADC_TICKS | RO | Contador RTL vivo de 32 bits a 100 MHz; lectura sin efectos laterales |
-| 0x1C | ADC_READY | RO | bit0 disponibilidad de XADC tras reset y espera de arranque |
 
 DATA se obtiene del campo de conversión de 12 bits del resultado XADC; el wrapper lo entrega alineado a la derecha. Canal, dirección DRP y reloj ADC se parametrizan en hardware y se registran en el contrato de integración.
 
@@ -993,9 +988,9 @@ La guardia SEQ1/SEQ2 requiere publicación simultánea en hardware y lecturas MM
 
 La interfaz adopta los registros de la especificación del PWM. CTRL_STATUS ocupa el offset 0x00, con enable en bit0, freq_sel en bits[2:1] y running de solo lectura en bit3. DUTY_REF ocupa 0x04, con el valor Q1.15 con signo en bits[15:0] y bits altos reservados a cero. DEADTIME ocupa 0x08, con bits[9:0] en ciclos de 10 ns, reset de 100 ciclos y saturación entre 20 y 1023 ciclos. El driver escribe solo campos R/W y conserva los demás campos de configuración.
 
-DUTY_REF, freq_sel y DEADTIME se aplican en el siguiente valle mediante registros sombra. Los códigos 00, 01, 10 y 11 corresponden a 10 kHz, aproximadamente 15.0015 kHz, 20 kHz y 20 kHz; sus períodos son 10000, 6666, 5000 y 5000 ciclos. El límite hardware de DUTY_REF es ±31129 códigos. El firmware aplica además el límite aprobado por PEDP, compatible con tiempo muerto y recarga bootstrap.
+DUTY_REF, freq_sel y DEADTIME se aplican en el siguiente valle mediante registros sombra. Los códigos freq_sel 00, 01, 10 y 11 corresponden a 5, 10, 20 y 40 kHz. El límite hardware de DUTY_REF es ±31129 códigos, equivalente a ±31129/32768 ≈ ±0,9499829. El firmware debe aplicar además el límite de modulación compatible con la frecuencia, el tiempo muerto y PEDP.
 
-El PWM distingue enable —portadora— de gates_en —potencia— y publica sync_done, precharge y power_ready. El arranque armado y el bloqueo independiente están implementados y conectados por `scripts/build_nexys4.tcl`. Su validación local no sustituye mediciones en placa ni aceptación de los contratos de potencia.
+El PWM documentado actualmente vincula enable con portadora, trigger y compuertas. El arranque en fase mediante sync_start_i y el bloqueo independiente de compuertas requerido por WARMUP son ampliaciones pendientes del contrato C4. Se deben acordar sus señales y prioridades antes de habilitar el lazo integrado.
 
 ### 8.4. Protocolo AXI4-Lite
 
@@ -1096,13 +1091,13 @@ Las direcciones base y los rangos definitivos de cada periférico se establecer�
 
 | Componente previsto | Ubicación | Responsabilidad |
 |---|---|---|
-| Aplicación y estados | vitis/app/ | Inicialización, main, WARMUP/PRECHARGE/RUNNING/FAULT |
+| Aplicación y estados | vitis/app/ | Inicialización, main, WARMUP/RUNNING/FAULT |
 | ISR y control | vitis/app/ | Lectura periódica, PR, actualización y registro |
 | Drivers propios ADC/PWM | vitis/drivers/ | Accesos MMIO y semántica de registros |
 | Drivers AMD | BSP generado | Timer, INTC, GPIO y UART Lite |
 | Receptor Python | scripts/ | Decodificar trama, convertir, graficar y guardar CSV |
 
-Se distinguen inicialización, WARMUP, PRECHARGE, RUNNING y FAULT. La transmisión tiene estado independiente y RUNNING puede coexistir con exportación. El diagnóstico mantiene gates_en=0 y entrega códigos ADC sin asignarles amperes hasta contar con calibración.
+Se mantienen INIT, WARMUP, RUNNING y FAULT como estados de control. El estado de transmisión es independiente: IDLE, WAIT_SNAPSHOT, HEADER, RECORDS y CRC. Por tanto, RUNNING puede coexistir con una exportación.
 
 #### 9.1.1 Inicialización y main
 
@@ -1112,7 +1107,7 @@ Se distinguen inicialización, WARMUP, PRECHARGE, RUNNING y FAULT. La transmisi�
 
 La inicialización mantiene las salidas bloqueadas, comprueba configuración y calibra a partir de valores suministrados. Después prepara coeficientes, memoria, drivers y sincronización. WARMUP establece la primera secuencia válida; RUNNING habilita el control cuando los contratos están satisfechos. Si falta calibración o PR válido, se permite diagnóstico con potencia deshabilitada.
 
-WARMUP bloquea potencia y admite disparos ADC solo después de sincronizar. La primera ISR verifica sync_done; la primera muestra posterior debe cumplir umbrales y fase dentro de una espera acotada. Se solicita habilitación en el pico y se espera PRECHARGE con mando cero. Solo power_ready permite RUNNING. Una pérdida posterior de esa confirmación o una falla externa provoca bloqueo y FAULT.
+WARMUP mantiene portadora y disparos activos con compuertas bloqueadas; la primera IRQ del arranque no exige una muestra previa. La espera de una primera tupla válida tiene límite de períodos y diagnóstico de fallo. La liberación del bloqueo se solicita para un valle, con referencia limitada y PR inicializado; no por una escritura asíncrona que recorte un pulso. El contrato debe distinguir ENABLE de potencia, portadora activa y running. La interfaz PWM actual detiene la portadora y los disparos con enable=0, por lo que este arranque requiere la ampliación C4 antes de su implementación integrada.
 
 Main filtra botones, publica cambios de amplitud, solicita snapshots y transmite un número acotado de bytes si la FIFO UART dispone de espacio. No transmite bloques completos dentro de una sección crítica ni deshabilita interrupciones durante el envío.
 
@@ -1125,7 +1120,7 @@ Main filtra botones, publica cambios de amplitud, solicita snapshots y transmite
 La lectura incluye STATUS además de DATA/TIME y las dos lecturas de SEQ; las validaciones de tiempo y error descritas a continuación forman parte de la atención periódica.
 
 1. Elevar GPIO_ISR y capturar el tiempo de entrada.
-2. Reconocer el Timer; distinguir WARMUP, PRECHARGE, RUNNING o FAULT.
+2. Reconocer el Timer; distinguir WARMUP, RUNNING o FAULT.
 3. Leer una tupla ADC coherente con hasta dos intentos.
 4. Comprobar secuencia, antigüedad, errores y umbrales raw calibrados.
 5. Convertir la muestra y evaluar la referencia en el instante de muestreo.
@@ -1144,21 +1139,14 @@ timer_isr():
     entrada = ADC_TICKS; GPIO_ISR = 1
     reconocer_fuente_timer_sin_recargar()
     si FAULT: atender_snapshot_de_diagnostico(); ir a salida
-    si primera_IRQ: verificar_sync_done_y_fijar_marca_de_arranque(); ir a salida
     tupla = leer_SEQ_DATA_TIME_STATUS_SEQ(max_intentos=2)
-    si WARMUP y tupla_anterior_a_marca: descartar_y_esperar_con_timeout(); ir a salida
     si WARMUP:
         si errores_ADC_o_limite_de_espera_excedido(tupla):
             bloquear_compuertas_y_entrar_FAULT(); ir a salida
         si primera_tupla_valida_dentro_de_umbrales_y_fase_verificada(tupla):
             fijar_last_seq_y_fase(); inicializar_PR_segun_PEDP()
-            escribir_mando_cero_y_solicitar_habilitacion_en_pico()
-            estado = PRECHARGE
-        ir a salida
-    si PRECHARGE:
-        verificar_tupla_continua_umbral_y_deadline(); mantener_mando_cero()
-        si power_ready: estado = RUNNING; fase = 0
-        si timeout: bloquear_compuertas_y_entrar_FAULT()
+            preparar_referencia_segura_y_solicitar_liberacion_en_valle()
+            estado = RUNNING
         ir a salida
     si tupla invalida, vieja, con errores o seq != last_seq+1:
         bloquear_compuertas_y_entrar_FAULT(); ir a salida
@@ -1213,11 +1201,12 @@ La función round redondea al entero más cercano.
 
 | fs propuesta | Ts | Ciclos de período | TLR0 |
 |---|---:|---:|---:|
+| 5 kHz | 200 µs | 20000 | 19998 |
 | 10 kHz | 100 µs | 10000 | 9998 |
-| ≈15.0015 kHz | 66.66 µs | 6666 | 6664 |
 | 20 kHz | 50 µs | 5000 | 4998 |
+| 40 kHz | 25 µs | 2500 | 2498 |
 
-El cuarto código PWM repite 20 kHz. Timer usa tdd_timer_prepare_ticks(period_ticks) y TLR=period_ticks−2 para conservar exactamente 6666 ciclos. El acumulador de fase usa también período/reloj. Los coeficientes PR requieren validación para cada Ts; redondear solo el campo Hz no conserva la fase.
+Los casos de cálculo corresponden a los cuatro códigos de frecuencia del diseño PWM. La selección de la frecuencia de operación requiere validación con PEDP. Si se utiliza un driver que recibe ciclos en lugar del valor crudo TLR, se revisa su implementación para no aplicar dos veces la compensación.
 
 El código oficial de `XTmrCtr_SetResetValue` consultado escribe ResetValue directamente en TLR [R11]: para ese contrato se pasa 4998, sin una segunda resta. Aún se debe comprobar la revisión incluida en el BSP real y medir el intervalo; no hay XSA/BSP en esta base.
 
@@ -1357,19 +1346,19 @@ Propiedad de los bancos: solo la ISR modifica el activo y hace FREE→ACTIVE→F
 
 Una exportación durante otra transmisión responde mediante indicador ocupado. Se exportan valid_count registros, no posiciones sin inicializar. Si aún no existen cinco ciclos, se identifica la captura como corta y no se usa para evaluar el criterio estacionario del enunciado.
 
-#### 9.4.2 Protocolo binario v1/v2
+#### 9.4.2 Protocolo binario v1 propuesto
 
 Todos los enteros son little-endian; float32 usa IEEE-754 y se serializa explícitamente. Cabecera fija de 48 bytes:
 
 | Byte | Campo | Tipo |
 |---:|---|---|
 | 0–3 | Magic ASCII TDD4 | 4 bytes |
-| 4 | Versión = 1 o 2 | uint8 |
+| 4 | Versión = 1 | uint8 |
 | 5 | Tipo = 1, captura | uint8 |
 | 6–7 | header_bytes = 48 | uint16 |
 | 8–11 | capture_id | uint32 |
 | 12–15 | sample_count | uint32 |
-| 16–19 | v1: fs_hz; v2: tick_clock_hz = 100000000 | uint32 |
+| 16–19 | fs_hz | uint32 |
 | 20–23 | first_seq | uint32 |
 | 24–27 | first_sample_time_ticks | uint32 |
 | 28–31 | offset_code | float32 |
@@ -1381,7 +1370,7 @@ Todos los enteros son little-endian; float32 usa IEEE-754 y se serializa explíc
 
 Flags: bit0 captura corta; bit1 falla de control registrada; bit2 error de adquisición en el intervalo; resto reservado. Tras la cabecera se envían N registros de 4 bytes y un uint32 CRC32/ISO-HDLC sobre cabecera y payload. Parámetros CRC: polinomio reflejado 0xEDB88320, init=0xFFFFFFFF, xorout=0xFFFFFFFF; vector de comprobación ASCII 123456789 → 0xCBF43926. No se añade un terminador ambiguo: longitud y CRC delimitan la captura.
 
-N=sample_count cumple 1≤N≤2048, payload_bytes=4N y record_bytes=4; calibración finita y no nula, raw entre 0 y 4095. v1 conserva fs_hz entero y exige fs_hz·sample_period_ticks=100000000. v2 mantiene 48 bytes de cabecera, pero el campo de bytes 16–19 contiene el reloj de ticks: fs=tick_clock_hz/sample_period_ticks. El emisor usa v2 para 6666 ciclos y v1 cuando existe frecuencia entera exacta. Se admiten períodos entre 3 y 1000000 ciclos. El flag corto se calcula con (N−1)·sample_period_ticks<10000000. Secuencia y tiempo admiten wrap modular de 32 bits.
+En la trama, N es sample_count y puede ser menor que la capacidad 2048. Debe cumplir 1≤N≤2048, payload_bytes=4N, record_bytes=4, fs_hz>0, calibración finita y 0≤raw≤4095. El bit0 indica que `(N−1)/fs < 0,1 s`; una captura vacía no se transmite como medición válida. El formato v1 supone reloj de ticks de 100 MHz y período entero en ciclos. Se exige sample_period_ticks>0 y fs_hz·sample_period_ticks=100000000. Si cambia ese reloj o la frecuencia deja de ser representable con estos campos, se revisa el protocolo. Un wrap de first_seq/first_sample_time_ticks se interpreta módulo 2^32.
 
 Para N=2048, la trama mide 8244 bytes. Su tiempo mínimo a 115200 y 8N1 es 8244·10/115200=0,715625 s; pausas de servicio pueden aumentarlo. El control sigue activo durante ese tiempo.
 
@@ -1412,13 +1401,13 @@ El límite de aceptación temporal es satisfacer todas las desigualdades de la s
 | C1 | Tarjeta, canal, pinout y rango analógico | Plataforma, adquisición y PEDP | Esquema y constraints verificados |
 | C2 | Offset, ganancia, signo y umbrales raw | Adquisición y PEDP | Calibración registrada |
 | C3 | Ts y fPWM compatibles con trigger en valle y ancho de cuatro ciclos | Equipo digital y PEDP | Presupuesto temporal y PR coherentes |
-| C4 | Arranque armado, bloqueo independiente, habilitación en pico y precarga | Plataforma, PWM y firmware | Implementado; RTL conectado, replay en C y BD validados. Mediciones físicas y aceptación final pendientes |
+| C4 | Ampliación del PWM para sync_start_i, carga de fase y bloqueo de compuertas independiente de la portadora | Plataforma, PWM y firmware | **Acordado e implementado en el PWM** (`gates_en`, `sync_start_i`, SYNC_PHASE). Verificado en la simulación del PWM (T10, T11 y T13). Por el bootstrap, la liberación se hace en el pico con precarga y no en el valle. Falta la simulación conjunta con el Timer |
 | C5 | Validación de CTRL_STATUS/DUTY_REF/DEADTIME, Q1.15 y límites por frecuencia/tiempo muerto | PWM y firmware | Tabla y driver compatibles |
 | C6 | Ecuación PR, coeficientes y anti-windup | PEDP y firmware | Vectores de referencia aprobados |
 | C7 | WCET float32, memoria, reloj de bus y combinación Vivado/Vitis/BSP | Plataforma y firmware | Tiempo/linker map aceptables y versiones registradas |
 | C8 | Reset de recuperación del wrapper/XADC y cotas CONVST/ADCCLK/watchdog | Plataforma y firmware | Sin respuesta tardía publicada; tiempos validados con dispositivo/IP |
 
-La habilitación del lazo integrado requiere cerrar estos contratos. Las pruebas integradas de temporización y ejecución en FPGA permanecen pendientes. La implementación portable y sus pruebas ejecutadas se describen en la sección 15.
+La habilitación del lazo integrado requiere cerrar estos contratos. Las pruebas de adquisición, temporización y firmware permanecen pendientes hasta disponer de evidencia de implementación y ensayo.
 
 ### 10.1 Parámetros de la etapa de potencia
 
@@ -1430,7 +1419,7 @@ La habilitación del lazo integrado requiere cerrar estos contratos. Las pruebas
 | Nivel lógico y polaridad de las compuertas | 3,3 V, activo en alto | Keylor – PEDP | Confirmado |
 | Mapeo de compuertas | `gate_ah_o`→FETD4, `gate_al_o`→FETD2 (pierna A, izquierda); `gate_bh_o`→FETD1, `gate_bl_o`→FETD3 (pierna B, derecha) | Keylor – PEDP | Confirmado |
 | Convención de signos | $v_{AB} = v_A - v_B$; corriente positiva de A hacia B | PEDP – firmware | Confirmado por PEDP; falta confirmar la polaridad del sensor |
-| Alimentación y carga | $V_{dc}$ = 24 V; R = 5 Ω, L = 30 mH; $m \approx 0{,}445$ para 1 A pico | PEDP | Confirmado |
+| Alimentación y carga | $V_{dc}$ = 24 V; R = 5 Ω, L = 30 mH; $m pprox 0{,}445$ para 1 A pico | PEDP | Confirmado |
 | Bootstrap | Precarga de 20 µs al liberar las compuertas; duty máximo por definir | Keylor – PEDP | Precarga implementada; duty máximo pendiente |
 | Estado seguro | Las cuatro compuertas en 0 | Keylor – PEDP | Confirmado |
 | Formato de `duty_ref` | Q1.15 con signo, saturado a ±0,95 | PWM – firmware | Pendiente |
@@ -1523,7 +1512,7 @@ Se verifican por separado el wrapper con modelo de respuestas XADC y la integrac
 | ID | Prueba | Criterio |
 |---|---|---|
 | T01 | TLR0=4998, reloj 100 MHz | Eventos separados exactamente 5000 ciclos en simulación; verificar también en placa |
-| T02 | Configurar 9998 y 6664 como casos alternativos | Períodos 10000 y 6666 ciclos; PR/PWM reconfigurados con salidas bloqueadas |
+| T02 | Configurar 19998, 9998 y 2498 como casos alternativos | Períodos 20000, 10000 y 2500 ciclos; PR/PWM reconfigurados con salidas bloqueadas |
 | T03 | Arranque armado por generateout0 | Un sync_start_i por armado; fase inicial y latencia de registros conocidas |
 | T04 | Trigger en valle e IRQ en fase 1000 a 20 kHz | Publicación en menos de 1000 ciclos con margen; escritura completada antes del siguiente valle |
 | T05 | Simulación de un millón de períodos | Sin deriva entre trigger, Timer y portadora |
@@ -1532,7 +1521,7 @@ Se verifican por separado el wrapper con modelo de respuestas XADC y la integrac
 | T08 | Forzar lectura tardía y ejecución excesiva | Detectar incumplimiento y entrar en FAULT; no continuar con dato viejo |
 | T09 | Wrap del contador RTL de 32 bits | Diferencias modulares correctas, sin falso jitter ni antigüedad negativa |
 | T10 | Reconocimiento Timer/INTC | Una atención por período, sin tormenta de interrupciones por flag pendiente |
-| T11 | WARMUP con potencia bloqueada y liberación posterior | Portadora/trigger activos sin pulsos de compuerta; primera IRQ sin falso error de SEQ; liberación en pico, precarga y confirmación power_ready; fallo de arranque acotado |
+| T11 | WARMUP con potencia bloqueada y liberación posterior | Portadora/trigger activos sin pulsos de compuerta; primera IRQ sin falso error de SEQ; liberación en valle; fallo de arranque acotado |
 
 Mediciones a registrar:
 
@@ -1655,190 +1644,3 @@ La distribución de responsabilidades se establece de acuerdo con los subsistema
 - [R12 — AMD embeddedsw: xtmrctr_intr.c](https://github.com/Xilinx/embeddedsw/blob/master/XilinxProcessorIPLib/drivers/tmrctr/src/xtmrctr_intr.c).
 
 La configuración del driver y las IP se verifica contra la versión efectiva del proyecto.
-
----
-
-## 15. Implementación de adquisición y firmware
-
-### 15.1 Alcance del código
-
-Se implementaron el motor de adquisición, su interfaz AXI4-Lite, el núcleo C del control, el servicio periódico, el histórico de dos bancos y el protocolo de exportación. Las pruebas locales ejecutan el RTL con un modelo digital de respuestas XADC y el firmware con periféricos simulados. La plataforma física, el XADC de AMD, el PWM completo y el BSP se integran posteriormente; no existe todavía una aplicación ejecutada en MicroBlaze V.
-
-| Archivo | Función |
-|---|---|
-| `rtl/xadc_if/xadc_acquisition.sv` | Disparo, lectura DRP, publicación y watchdog |
-| `rtl/xadc_if/xadc_axi_lite.sv` | Canales AXI independientes y mapa ADC de la sección 8.3 |
-| `vitis/app/control_core.c` | Calibración, referencia, PR, Q1.15 y estados |
-| `vitis/app/reference_lut.h` | Cuarto de seno de 65 valores e interpolación |
-| `vitis/app/control_runtime.c` | Atención periódica, deadlines y bloqueo por fallo |
-| `vitis/app/capture.c` | Bancos, snapshot, serialización y CRC |
-| `vitis/drivers/tdd_mmio.c` | Lectura ADC coherente y escritura PWM |
-| `vitis/drivers/tdd_timer.c` | Preparación y reconocimiento temprano de Timer 0 |
-| `scripts/capture_receiver.py` | Recepción, validación y salida CSV/JSON |
-| `scripts/configure_control_peripherals.tcl` | Creación parametrizada de Timer, UART y GPIO |
-
-### 15.2 Contrato del motor ADC implementado
-
-El wrapper utiliza un único reloj DCLK/AXI de 100 MHz. Sus entradas XADC son `xadc_ready_i`, `xadc_busy_i`, `xadc_eoc_i`, `xadc_drdy_i` y `xadc_do_i`; las salidas son CONVST, DEN, DWE=0 y DADDR. `xadc_ready_i` debe permanecer bajo hasta completar configuración, reset y asentamiento de la IP real. El modelo de pruebas genera respuestas digitales y no representa un sensor analógico.
-
-La FSM recorre IDLE, PULSE, WAIT_EOC, ISSUE_READ, WAIT_DRP y PUBLISH. Un disparo aceptado conserva el tiempo y produce un pulso CONVST. Después de EOC se espera DRDY bajo antes de emitir DEN durante un ciclo. Al recibirse DRDY se registra DO[15:4]; el estado PUBLISH actualiza DATA, TIME y SEQ en el mismo flanco. Las lecturas no borran VALID. ENABLE=0 impide nuevas solicitudes y permite terminar la aceptada.
-
-El detector PWM registra el nivel incluso con adquisición deshabilitada y requiere haber observado nivel bajo después de reset. Un trigger de cuatro ciclos produce una sola conversión. Una solicitud rechazada establece OVERRUN. Al agotarse el watchdog se entra en ERROR, BUSY permanece alto y no se publican respuestas tardías. W1C limpia el indicador, pero la recuperación exige reset coordinado del wrapper y XADC.
-
-Parámetros iniciales: `CONVST_CYCLES=4`, `SETTLE_CYCLES=20`, `TIMEOUT_CYCLES=800` y `DRP_ADDRESS=0x10`. Son candidatos para pruebas. Veinte ciclos de DCLK representan cuatro ADCCLK si el divisor es cinco; la plataforma debe verificar esa relación y los tiempos de su dispositivo. La dirección inicial corresponde al candidato VAUX0 y no asigna un pin ni confirma el canal físico. UG480 define el muestreo por flanco y la lectura DRP; el ancho CONVST y las cotas finales deben verificarse con la hoja de datos del dispositivo [R1, R9].
-
-AXI almacena AW y W por separado y admite una transacción pendiente de cada tipo. BVALID, RVALID, respuesta y datos permanecen estables bajo backpressure. CTRL y ERR_CLEAR respetan el strobe del byte bajo; escribir RO, una dirección desalineada o un offset no implementado devuelve SLVERR. Un cambio de SYNC_MODE requiere ENABLE previo=0 y BUSY=0. Un error nuevo domina un W1C coincidente.
-
-### 15.3 Núcleo C y atención periódica
-
-El control se inicializa con una configuración explícita: calibración, umbrales raw, frecuencia, período, edad permitida de muestra, tiempo máximo de WARMUP, Vdc, límite de modulación, tiempo muerto y coeficientes. Se rechazan valores no finitos, ganancia de calibración nula, denominador inestable y combinaciones sin margen de pulso. Las estructuras se reservan de forma estática; el runtime contiene los dos bancos y no debe alojarse como variable automática grande en el stack.
-
-WARMUP acepta una primera muestra dentro de plazo y umbrales, fija secuencia y origen de fase y prepara una referencia PWM cero. RUNNING exige incremento modular de uno, intervalo de muestra exacto y edad dentro del rango configurado. Los errores ADC, sobrecorriente, secuencia, tiempo o cálculo provocan FAULT y requieren reinicialización explícita. La referencia de 50 Hz usa acumulador de fase de 32 bits, tabla de un cuarto de seno e interpolación; cambiar amplitud conserva la fase y debe solicitarse al propietario ISR.
-
-La ecuación implementada es:
-
-```math
-u[k]=b_0 e[k]+b_1 e[k-1]+b_2 e[k-2]-a_1 u[k-1]-a_2 u[k-2].
-```
-
-Los ensayos sintéticos a 20 kHz usan como candidato `b=[10.09415323443, -19.97870442720, 9.88701611868]` y `a=[1, -1.99787044272, 0.99811693531]`, correspondientes al PR amortiguado con Kp=10, Kr=100, banda de 3 Hz y discretización Tustin. Esos coeficientes no se cargan como configuración automática del hardware: requieren validación PEDP y recalcularse si cambia Ts. La salida es voltaje y se convierte una sola vez mediante m=u/Vdc.
-
-La cuantización redondea Q1.15 y acota el código por el límite configurado y ±31129. El límite de código usa el entero inferior de 32768·m_max para conservar el margen. El supervisor aplica provisionalmente **FAULT ante saturación** y entrega mando cero; no continúa el lazo con estados acumulados ni presupone un anti-windup aprobado. La política definitiva se acuerda mediante C6.
-
-`tdd_runtime_prepare` bloquea compuertas, detiene PWM y prepara Timer por período exacto. Exige callbacks de bloqueo, solicitud de habilitación y confirmación power_ready. `vitis/bsp/main.c` aporta el adaptador SDT: registra Timer en INTC, resetea ADC/XADC, espera READY, configura PWM seguro y arma sincronización. PRECHARGE mantiene mando cero hasta power_ready. El adaptador se compiló como objeto contra cabeceras AMD con configuración de prueba; falta enlazar el BSP real y ejecutar en FPGA.
-
-`tdd_runtime_irq` reconoce Timer antes del cálculo, lee la tupla ADC con hasta dos intentos, ejecuta el núcleo y comprueba tiempo antes y después de MMIO. Se configuran edad máxima del latch, cota de escritura y margen, teniendo en cuenta trigger→CONVST. Si falta margen, bloquea antes de escribir. Si la escritura termina tarde, ordena bloqueo con prioridad sobre DUTY_REF; por eso el bloqueo independiente es una condición de integración. El adaptador `write32` debe garantizar acceso ordenado, sin caché y finalización de la escritura.
-
-Timer 0 se programa descendente, auto-reload y Generate, con TLR=period_ticks−2, pulso LOAD y reconocimiento W1C temprano. Timer 1 queda detenido y sin IRQ; ambos contadores están habilitados en el hardware integrado. tdd_timer_start se invoca después de registrar INTC y armar PWM; no se encadena XTmrCtr_InterruptHandler. El contrato se contrastó con el código oficial AMD [R11].
-
-### 15.4 Captura, propiedad de memoria y UART
-
-Los dos bancos mantienen 2048 registros `{raw:uint16, reference_mA:int16}` cada uno. Los registros ocupan 16384 bytes, más metadatos y estados. La ISR inserta en el activo, atiende solicitudes y congela punteros/metadatos sin copiar el arreglo. Main transmite el congelado por fragmentos de tamaño acotado y lo libera después de copiar su último byte. La ISR continúa utilizando el otro banco.
-
-La transferencia de propiedad utiliza cargas y almacenes atómicos C11 con semántica acquire/release. En la compilación provisional RV32IMC no aparecen helpers `__atomic` ni `__sync` en el objeto de captura. Esto no sustituye la revisión del desensamblado, las barreras MMIO ni la medición de interrupciones sobre el BSP definitivo. La inicialización borra los bancos antes de habilitar interrupciones; el servicio ISR solo modifica metadatos en el intercambio.
-
-Un salto de secuencia o de tiempo detiene la captura antes de agregar el registro discontinuo. FAULT marca únicamente el banco activo, conserva un FROZEN anterior y permite exportar después el intervalo continuo pendiente. Una solicitud mientras hay snapshot o solicitud pendiente devuelve ocupado. No se transmite una captura vacía.
-
-Se implementaron las cabeceras v1/v2 de 48 bytes, N registros y CRC32. Una captura completa mide 8244 bytes. El receptor conserva compatibilidad v1 y reconstruye la frecuencia racional de v2. Valida longitudes, CRC, raw, calibración, tiempo y flags; el timeout parcial es de 2 s. CSV/JSON conservan período, versión y calibración sin sobrescribir mediciones. Agregar salida PR y modulación al histórico del Issue #15 sigue pendiente, con revisión de memoria y formato de registros.
-
-El protocolo v1 exporta raw e iref; `volts`, `modulation` y Q1.15 están disponibles en la salida del núcleo, pero todavía no se incorporan al histórico transmitido. Su registro adicional, solicitado en el Issue #15, necesita una ampliación versionada del protocolo y revisar memoria. La función `tdd_tx_read` entrega bytes acotados; todavía falta conectarla a la FIFO real de AXI UART Lite en main, sin llamadas bloqueantes dentro de la ISR.
-
-### 15.5 Configuración de periféricos y herramientas
-
-`configure_control_peripherals.tcl` crea Timer de dos contadores de 32 bits, UART Lite a 115200/8N1 y GPIO dual: tres entradas de botones y una salida de instrumentación, sin IRQ GPIO. El script requiere un Block Design abierto y rechaza nombres existentes para no modificar silenciosamente otra configuración. Las conexiones AXI, reloj/reset, Timer→INTC, generateout0, UART, direcciones y pines se completan con la plataforma.
-
-La placa confirmada es **Digilent Nexys 4 original**. `verify_vivado.tcl` selecciona por defecto el destino `nexys4` (`xc7a100tcsg324-1`), conforme al [manual de Nexys 4 de Digilent](https://digilent.com/reference/_media/reference/programmable-logic/nexys-4/nexys4_rm.pdf); conserva `basys3` como destino alternativo para reproducir la verificación previa. La memoria y los constraints se toman de la plataforma Nexys 4 correspondiente, sin sustituirlos por los de Nexys 4 DDR o Nexys A7. Esta selección del FPGA no asigna pines ni constituye una plataforma MicroBlaze V.
-
-En Windows, los proyectos y auxiliares de Vivado se generan bajo una ruta temporal corta para evitar los límites de longitud de la ruta de OneDrive; los reportes se exportan a `build/vivado/`. No se requiere mover el repositorio ni cambiar su configuración de permisos.
-
-Desde la raíz del repositorio:
-
-```powershell
-python scripts/test_local.py
-python scripts/cross_compile_core.py --toolchain-dir C:/AMDDesignTools/2026.1/Vitis/gnu/riscv/nt/bin
-& C:/AMDDesignTools/2026.1/Vivado/bin/vivado.bat -mode batch -source scripts/verify_vivado.tcl -tclargs nexys4 all
-```
-
-La compilación cruzada genera objetos RV32IMC/ILP32 con software float, sin `fast-math`. Es un perfil provisional: falta enlazar el BSP, revisar el mapa de memoria y medir WCET con la configuración real del MicroBlaze V. Los ejecutables, CSV y reportes regenerables se conservan en `build/`, fuera del contenido versionado.
-
-### 15.6 Verificación ejecutada y próximos pasos de integración
-
-El 10 de noviembre de 2026 se ejecutaron 284 comprobaciones RTL, 64508 comprobaciones C de núcleo/captura y 70 del servicio periódico, además de 11 pruebas Python. La cantidad de comprobaciones incluye iteraciones de las secuencias sintéticas; no equivale a esa cantidad de casos independientes. La captura binaria producida por C se validó con Python y produjo CSV/JSON. Se verificaron buffers con wrap, captura corta, CRC, transmisión fragmentada, fallos mientras existe un FROZEN anterior, discontinuidades, fase continua, fallos numéricos y deadlines antes/después de MMIO.
-
-En un modelo promedio RL sintético con R=5 Ω, L=2.2 mH, ADC cuantizado y retardo de un período, las fundamentales calculadas fueron 0.191284, 0.478311 y 0.956577 A para referencias de 0.2, 0.5 y 1 A. Estos resultados son del ensayo de software y no representan PLECS, PWM conmutado, adquisición analógica ni mediciones físicas.
-
-La síntesis aislada de `xadc_axi_lite` en Vivado 2026.1 para `xc7a35tcpg236-1` terminó sin errores y reportó 132 LUT, 258 FF, 0 BRAM y 0 DSP. El análisis posterior a síntesis con reloj de 10 ns reportó WNS=4.991 ns para las rutas analizadas. Hay E/S sin presupuesto y no existe colocación/ruteo ni modelo de reloj final; por tanto ese valor no acredita cierre temporal del sistema integrado.
-
-Tras confirmar Nexys 4, se repitió la comprobación con `xc7a100tcsg324-1`: síntesis y generación de periféricos completadas, 132 LUT, 258 FF, 0 BRAM y 0 DSP. El reporte posterior a síntesis con reloj de 10 ns indica WNS=5.139 ns en las rutas analizadas, con las mismas limitaciones OOC. El checkpoint, los reportes y el Tcl de periféricos se generaron en `build/vivado/nexys4/`.
-
-La creación de Timer, UART y GPIO también se ejecutó en Vivado 2026.1, con comprobación de existencia de los parámetros y lectura de sus valores. Se generaron checkpoint del ADC y Tcl de periféricos. El Block Design de comprobación conserva una advertencia por falta de validación: contiene periféricos aislados y todavía requiere las conexiones de plataforma; ese resultado no se presenta como validación del sistema completo.
-
-Para continuar en la Nexys 4 se requiere confirmar canal y acondicionamiento; crear o recibir el Block Design/XSA para esa placa; configurar XADC y su señal ready/reset; implementar C4 con PWM; asignar direcciones y constraints; enlazar el BSP/INTC/UART; y medir tiempos y memoria. El cierre de Issues #6, #9, #12 y #15 depende de esas comprobaciones y de la revisión del código.
-
-## 16. Integración reproducible de Nexys 4
-
-Esta actualización integra el ADC y firmware con la arquitectura MicroBlaze V y el PWM compartidos en `develop` (`98b0758`). Conserva el proyecto base en `vivado/microblaze_v_system/` y construye una copia integrada mediante `scripts/build_nexys4.tcl`. El proyecto base por sí solo no contiene el wrapper de adquisición; se debe utilizar el script para reconstruir el sistema descrito aquí.
-
-### 16.1 Reconstrucción y alcance de la verificación
-
-Desde la raíz del repositorio, con Vivado 2026.1 disponible:
-
-```powershell
-python scripts/test_local.py
-vivado -mode batch -source scripts/build_nexys4.tcl -tclargs validate
-```
-
-`validate` crea la copia temporal, agrega las fuentes RTL, sustituye el Wizard AXI continuo por XADC DRP en modo por evento, conecta adquisición/PWM/Timer/GPIO, asigna direcciones, ejecuta `validate_bd_design` y genera el wrapper. No programa la FPGA. En `build/nexys4_integrated/` se conservan `integrated_bd.tcl`, `ip_status.rpt` y `project_path.txt`; este último indica el proyecto temporal que se puede abrir en Vivado. El Tcl exportado requiere que las fuentes de los módulos estén agregadas antes de cargarlo; el script de reconstrucción realiza ese paso.
-
-Para las etapas posteriores:
-
-```powershell
-vivado -mode batch -source scripts/build_nexys4.tcl -tclargs synth
-vivado -mode batch -source scripts/build_nexys4.tcl -tclargs bitstream
-```
-
-`synth` solicita síntesis del sistema; `bitstream` agrega implementación y exportación de `nexys4_control.xsa` con bitstream cuando los runs terminan. Estos modos están preparados, pero no se presenta su ejecución como evidencia en esta actualización. La validación integrada se completó el 15 de noviembre de 2026. Conserva advertencias por conexión individual de señales DRP/GPIO, uso de IP utilitaria y ancho de dirección del bloque BRAM; el cierre de implementación debe revisar esos mensajes y el mapa de memoria.
-
-### 16.2 Conexiones y direcciones
-
-| Componente | Dirección base | Función integrada |
-|---|---|---|
-| AXI GPIO | 0x40000000 | Canal 1: tres botones; canal 2: marca ISR y LED de estado |
-| AXI UARTLite | 0x40600000 | 115200 baudios, 8N1; envío consultado desde main |
-| AXI INTC | 0x41200000 | Timer en entrada 0; UART en entrada 1, sin habilitar su IRQ en la aplicación |
-| AXI Timer | 0x41C00000 | Contador 0 descendente/Generate/auto-reload; contador 1 detenido |
-| Wrapper ADC personalizado | 0x44A00000 | Publicación atómica y registros de §8.3; no es el mapa del Wizard AXI |
-| PWM personalizado | 0x44A10000 | Modulación, armado de fase, compuertas y estado de precarga |
-
-Los bloques usan el reloj común de 100 MHz y reset periférico activo bajo. `generateout0` se conecta a `sync_start_i`. El PWM acepta un solo pulso por armado y dirige `adc_trigger_o` al wrapper únicamente después de `sync_done`. CONVST, DEN, DWE, DADDR, DO, DRDY, EOC y BUSY se conectan al Wizard DRP. El canal elegido en la plataforma es VAUX3, con dirección DRP 0x13; el valor genérico por defecto del módulo permanece en 0x10 y el script lo sobrescribe explícitamente.
-
-`xadc_startup_guard` coordina reset del convertidor, reset software y disponibilidad. Los parámetros iniciales son ocho ciclos de reset y 100000 ciclos de espera; después se exige BUSY bajo para publicar READY. Ese intervalo es configurable y no acredita calibración del sensor ni asentamiento analógico medido. El bit RESET de ADC_CTRL limpia la publicación y reinicia esta secuencia; W1C por sí solo no recupera ERROR.
-
-### 16.3 Período exacto y datos exportados
-
-| Código PWM | Período a 100 MHz | TLR0 | Frecuencia real |
-|---|---:|---:|---:|
-| 00 | 10000 | 9998 | 10000 Hz |
-| 01 | 6666 | 6664 | 100000000/6666 ≈ 15001.50015 Hz |
-| 10 / 11 | 5000 | 4998 | 20000 Hz |
-
-`period_ticks` es la base temporal común para Timer, comprobación de muestras, acumulador de referencia y capturas. En C, `fs_hz=0` permite representar una frecuencia racional; si se suministra un entero distinto de cero, debe coincidir exactamente con el período. Los coeficientes PR no se trasladan automáticamente de una frecuencia a otra.
-
-La trama v2 evita redondear la opción de 6666 ciclos: conserva tamaños, registros y CRC de v1, pero sustituye el campo `fs_hz` por `tick_clock_hz`. El receptor calcula la frecuencia como reloj/período y conserva ambos datos en la exportación. Las capturas con frecuencia entera exacta siguen usando v1. El CSV conserva `time_s=k·period_ticks/100000000`; así no acumula un error por escribir 15000 Hz en lugar de la frecuencia real.
-
-El registro actual sigue siendo `{raw:uint16, reference_mA:int16}`. Incorporar salida PR y modulación del Issue #15 exige ampliar el formato y revisar capacidad, uso de BRAM y compatibilidad; no se declara ese requisito finalizado.
-
-### 16.4 Aplicación de placa y arranque sin potencia
-
-`vitis/bsp/main.c` es la entrada de aplicación Standalone SDT. Proporciona accesos MMIO ordenados con barreras RISC-V y lectura posterior a escritura; registra el handler en INTC; prepara reset/adquisición/Timer/PWM; atiende botones con estabilidad de 20 ms; publica solicitudes de amplitud para el propietario ISR y transmite como máximo ocho bytes UART por iteración. El banco completo nunca se envía dentro de la ISR.
-
-La secuencia de control es WARMUP → PRECHARGE → RUNNING. La primera interrupción verifica la sincronización sin consumir una muestra previa. Después se establece una tupla válida y se solicita habilitación con mando cero. La liberación se concede en el pico; los inferiores mantienen la precarga durante 2000 ciclos. Hasta confirmar `power_ready`, no se acumulan estados PR ni se incorpora un intervalo ficticio al histórico. Errores de adquisición, secuencia, tiempo, valores numéricos, saturación o pérdida de habilitación llevan a FAULT. El rearme es explícito, sin transmisión pendiente y con interrupciones deshabilitadas durante la reinicialización.
-
-`vitis/bsp/board_config.h` fija inicialmente 24 V, código PWM 2 y tiempo muerto de 100 ciclos —1 µs—. Offset, ganancia, umbrales, coeficientes PR, límite de modulación y confirmaciones de sensado/protección/tiempos deben completarse con resultados aprobados. Las confirmaciones comienzan en cero: el modo predeterminado mantiene las cuatro compuertas bloqueadas y transmite líneas `RAW=0x.... SEQ=0x........` con códigos sin calibrar a 10 Hz. Este modo no utiliza el receptor binario de capturas; se observa en una terminal serial.
-
-En modo de control aprobado, los botones centrales, superior e izquierdo solicitan respectivamente captura, cambio entre 0.2/0.5/1 A y rearme después de FAULT. UART transmite únicamente las tramas binarias. El archivo `main.c` debe compilarse con los `.c` de `vitis/app/` y `vitis/drivers/`, enlazando `libm` y el BSP SDT exportado de la plataforma integrada. No se deben compilar los ejecutables de prueba como parte de esa aplicación.
-
-### 16.5 Pinout de integración y acuerdos físicos pendientes
-
-Además de reloj E3, reset C12, UART C4/D4 y VAUX3 A13/A14, `control_pins.xdc` propone:
-
-| Señal | Conexión Nexys 4 | Pin FPGA |
-|---|---|---|
-| A superior / A inferior | JA1 / JA2 | B13 / F14 |
-| B superior / B inferior | JA3 / JA4 | D17 / E17 |
-| Marca ISR | JA7 | G13 |
-| Entrada de falla activa en alto | JA8 | C17 |
-| LED de diagnóstico/falla | LED0 | T8 |
-| Exportar / amplitud / rearme | BTNC / BTNU / BTNL | E16 / F15 / T16 |
-
-El cableado debe confirmar estas asignaciones. El interruptor manual conectado a GND no tiene todavía una semántica de deshabilitación confirmada; no se supone equivalente a la entrada `fault_i` activa en alto. No hay una protección automática de sobrecorriente instalada según el estado informado. Su polaridad, actuación física y relación con el bloqueo de los IR2110 deben acordarse antes de habilitar potencia.
-
-Los valores nominales de PEDP son 24 V, R=5 Ω, L=30 mH y fundamental de 50 Hz. El índice aproximado de 0.445 para 1 A pico es un punto nominal, no el límite máximo del firmware. Falta confirmar sensor y polaridad A→B, calibración, margen bootstrap y coeficientes PR para cada período. Los ensayos RL anteriores de §15 con L=2.2 mH y 12 V son pruebas históricas de software; no validan esta carga nominal.
-
-### 16.6 Evidencia y límites de aceptación
-
-`scripts/test_local.py` ejecuta pruebas AXI/ADC, PWM, núcleo C, runtime, período racional, CRC/receptor y la cadena conectada de tres frecuencias. `tb_control_chain.sv` usa PWM y adquisición reales con respuestas ADC y eventos Timer sintéticos; sus publicaciones se reproducen mediante el runtime C real en `test_control_chain.c`. Esto comprueba WARMUP, PRECHARGE, RUNNING, secuencia y fase durante los intervalos ensayados. No ejecuta un procesador dentro del simulador ni el modelo analógico AMD.
-
-`cross_compile_core.py` genera objetos RV32IMC/ILP32. `check_bsp_api.py` comprueba la entrada de placa contra cabeceras AMD instaladas y genera configuraciones de prueba marcadas como tales. Ninguno sustituye el enlace de un BSP real, su ELF ni la revisión del linker map. Los logs reproducibles quedan en `build/`, fuera del contenido versionado.
-
-Siguen pendientes síntesis/implementación de esta versión ampliada, revisión de temporización final, XSA/BSP/ELF, memoria y stack reales, captura UART física, WCET/jitter durante exportación y ensayo de al menos un millón de períodos. La evidencia local permite revisar y continuar la integración; no acredita funcionamiento experimental del inversor ni cierra automáticamente los issues.

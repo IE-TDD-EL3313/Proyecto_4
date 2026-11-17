@@ -23,7 +23,7 @@ module tb_pwm_controller;
     logic [3:0]  wstrb;
     logic [1:0]  bresp, rresp;
     logic        sync_start, fault;
-    logic        gate_ah, gate_al, gate_bh, gate_bl, trig, adc_trig;
+    logic        gate_ah, gate_al, gate_bh, gate_bl, trig;
 
     pwm_controller_axi dut (
         .s_axi_aclk    (clk),
@@ -53,8 +53,7 @@ module tb_pwm_controller;
         .gate_al_o     (gate_al),
         .gate_bh_o     (gate_bh),
         .gate_bl_o     (gate_bl),
-        .pwm_trigger_o (trig),
-        .adc_trigger_o (adc_trig)
+        .pwm_trigger_o (trig)
     );
 
     // Senales internas usadas como referencia por el testbench
@@ -436,8 +435,6 @@ module tb_pwm_controller;
         // ---------------- T11: sync_start_i ----------------
         $display("\nT11 - sync_start_i (arranque en fase con el AXI Timer)");
         // enable=1, gates_en=0, 20 kHz, SYNC_PHASE = 1000
-        check("T11 ADC gated before initial sync", !adc_trig, "");
-        axi_write(A_CTRL, 32'h85);              // explicit one-shot arm
         repeat (333) @(posedge clk);
         @(negedge clk); sync_start = 1'b1;
         @(negedge clk); sync_start = 1'b0;
@@ -456,7 +453,7 @@ module tb_pwm_controller;
             @(negedge clk); sync_start = 1'b0;
             if (c != 1000) ok = 0;
         end
-        check("T11 pulsos posteriores ignorados sin deriva", ok, $sformatf("c=%0d", c));
+        check("T11 pulsos periodicos sin salto ni deriva", ok, $sformatf("c=%0d", c));
         // Con compuertas activas sync_start_i se ignora
         axi_write(A_CTRL, 32'h15);
         wait_periods(2);
@@ -466,24 +463,11 @@ module tb_pwm_controller;
         check("T11 ignorado con compuertas activas", c != 1000 && (c == n + 1 || c == n - 1),
               $sformatf("antes=%0d despues=%0d", n, c));
         // SYNC_PHASE configurable
-        axi_write(A_CTRL, 32'h04);              // phase changes require stopped PWM
+        axi_write(A_CTRL, 32'h05);
         axi_write(A_PHASE, 32'd1234);
-        axi_write(A_CTRL, 32'h85);
         @(negedge clk); sync_start = 1'b1;
         @(negedge clk); sync_start = 1'b0;
         check("T11 SYNC_PHASE configurable (1234)", c == 1234, $sformatf("c=%0d", c));
-        axi_read(A_CTRL, r);
-        check("T11 sync_done set and arm cleared", r[8] && !r[7], $sformatf("CTRL=%h",r));
-        repeat(333) @(negedge clk);
-        n=c;
-        sync_start=1;
-        @(negedge clk);sync_start=0;
-        check("T11 extra off-phase pulse cannot reload", c!=1234 && (c==n+1 || c==n-1), "");
-        axi_write(A_PHASE, 32'd1000);
-        check("T11 phase write while running returns SLVERR", bresp==2, "");
-        axi_read(A_PHASE,r);
-        check("T11 rejected phase write preserves value",r==1234, "");
-        axi_write(A_CTRL, 32'h04);
         axi_write(A_PHASE, 32'd1000);
 
         // ---------------- T12: fault_i ----------------
