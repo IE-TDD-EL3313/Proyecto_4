@@ -32,9 +32,11 @@ module pwm_controller_axi #(
     parameter bit                 GATE_ACTIVE_LOW = 1'b0        // IR2110: HIN/LIN activos en alto
 ) (
     // Reloj y reset
+    (* X_INTERFACE_PARAMETER = "ASSOCIATED_BUSIF s_axi, ASSOCIATED_RESET s_axi_aresetn, FREQ_HZ 100000000" *)
     input  logic                            s_axi_aclk,
     input  logic                            s_axi_aresetn,
     // AXI4-Lite esclavo
+    (* X_INTERFACE_PARAMETER = "XIL_INTERFACENAME s_axi, PROTOCOL AXI4LITE, DATA_WIDTH 32, ADDR_WIDTH 4, READ_WRITE_MODE READ_WRITE" *)
     input  logic [C_S_AXI_ADDR_WIDTH-1:0]   s_axi_awaddr,
     input  logic [2:0]                      s_axi_awprot,
     input  logic                            s_axi_awvalid,
@@ -62,10 +64,15 @@ module pwm_controller_axi #(
     output logic                            gate_al_o,
     output logic                            gate_bh_o,
     output logic                            gate_bl_o,
-    output logic                            pwm_trigger_o
+    output logic                            pwm_trigger_o,
+    output logic                            adc_trigger_o
 );
 
     logic               enable, gates_en, running, gates_on, fault;
+    logic               sync_arm, sync_done, precharge, power_ready;
+    logic [13:0]        phase_limit;
+    // Diagnostic PWM trigger remains available; acquisition sees only post-sync events.
+    assign adc_trigger_o = pwm_trigger_o && sync_done;
     logic        [1:0]  freq_sel;
     logic signed [15:0] duty;
     logic        [9:0]  dead_time;
@@ -100,13 +107,18 @@ module pwm_controller_axi #(
         .rready       (s_axi_rready),
         .enable_o     (enable),
         .gates_en_o   (gates_en),
+        .sync_arm_o   (sync_arm),
         .freq_sel_o   (freq_sel),
         .duty_o       (duty),
         .dead_time_o  (dead_time),
         .sync_phase_o (sync_phase),
         .running_i    (running),
         .gates_on_i   (gates_on),
-        .fault_i      (fault)
+        .fault_i      (fault),
+        .sync_done_i  (sync_done),
+        .precharge_i  (precharge),
+        .power_ready_i(power_ready),
+        .phase_limit_i(phase_limit)
     );
 
     pwm_core #(
@@ -122,6 +134,7 @@ module pwm_controller_axi #(
         .rst_n         (s_axi_aresetn),
         .enable_i      (enable),
         .gates_en_i    (gates_en),
+        .sync_arm_i    (sync_arm),
         .freq_sel_i    (freq_sel),
         .duty_i        (duty),
         .dead_time_i   (dead_time),
@@ -135,7 +148,11 @@ module pwm_controller_axi #(
         .pwm_trigger_o (pwm_trigger_o),
         .running_o     (running),
         .gates_on_o    (gates_on),
-        .fault_o       (fault)
+        .fault_o       (fault),
+        .sync_done_o   (sync_done),
+        .precharge_o   (precharge),
+        .power_ready_o (power_ready),
+        .phase_limit_o (phase_limit)
     );
 
 endmodule

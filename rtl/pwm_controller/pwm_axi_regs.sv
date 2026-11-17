@@ -6,11 +6,14 @@
 // 0x00    CTRL_STATUS  [0] enable (RW)   [2:1] freq_sel (RW)  [3] running (RO)
 //                      freq_sel: 00=10 kHz 01=15 kHz 10=20 kHz 11=20 kHz
 //                      [4] gates_en (RW) [5] gates_on (RO)    [6] fault (RO)
+//                      [7] sync_arm (RW) [8] sync_done (RO)
+//                      [9] precharge (RO) [10] power_ready (RO)
 // 0x04    DUTY_REF     [15:0] duty_ref Q1.15 con signo, saturado a +/-DUTY_MAX
 // 0x08    DEADTIME     [9:0] ciclos de 10 ns, saturado a [DT_MIN, DT_MAX]
 // 0x0C    SYNC_PHASE   [13:0] posicion de la portadora al recibir sync_start_i
 //
-// - AW y W se aceptan en cualquier orden. Respuestas siempre OKAY.
+// - AW y W se aceptan en cualquier orden. SYNC_PHASE invalido devuelve SLVERR.
+// - La fase solo cambia con portadora detenida y debe ser menor que N.
 // - Direcciones no mapeadas: lectura 0, escritura ignorada.
 // - Una falla (fault) borra gates_en: el software debe volver a habilitarlas.
 // -----------------------------------------------------------------------------
@@ -51,6 +54,7 @@ module pwm_axi_regs #(
     // Registros hacia el nucleo
     output logic                enable_o,
     output logic                gates_en_o,
+    output logic                sync_arm_o,
     output logic [1:0]          freq_sel_o,
     output logic signed [15:0]  duty_o,
     output logic [9:0]          dead_time_o,
@@ -58,7 +62,11 @@ module pwm_axi_regs #(
     // Estado desde el nucleo
     input  logic                running_i,
     input  logic                gates_on_i,
-    input  logic                fault_i
+    input  logic                fault_i,
+    input  logic                sync_done_i,
+    input  logic                precharge_i,
+    input  logic                power_ready_i,
+    input  logic [13:0]         phase_limit_i
 );
 
     localparam logic [1:0] REG_CTRL  = 2'd0;
@@ -68,7 +76,8 @@ module pwm_axi_regs #(
 
     // ---------------- Vista de 32 bits de cada registro ----------------
     logic [31:0] view_ctrl, view_duty, view_dead, view_phase;
-    assign view_ctrl  = {25'd0, fault_i, gates_on_i, gates_en_o, running_i, freq_sel_o, enable_o};
+    assign view_ctrl  = {21'd0, power_ready_i, precharge_i, sync_done_i,
+                        sync_arm_o, fault_i, gates_on_i, gates_en_o, running_i, freq_sel_o, enable_o};
     assign view_duty  = {16'd0, duty_o};
     assign view_dead  = {22'd0, dead_time_o};
     assign view_phase = {18'd0, sync_phase_o};
@@ -132,7 +141,6 @@ module pwm_axi_regs #(
     assign do_write = (have_aw || aw_hs) && (have_w || w_hs) && !bvalid;
     assign idx_wr   = wr_addr[3:2];
     assign wr_val   = apply_strb(view_wr, wr_data, wr_strb);
-    assign bresp    = 2'b00;  // OKAY
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin
@@ -142,8 +150,10 @@ module pwm_axi_regs #(
             w_data_q     <= '0;
             w_strb_q     <= '0;
             bvalid       <= 1'b0;
+            bresp        <= 2'b00;
             enable_o     <= 1'b0;
             gates_en_o   <= 1'b0;
+            sync_arm_o   <= 1'b0;
             freq_sel_o   <= 2'b00;
             duty_o       <= '0;
             dead_time_o  <= DT_RESET;
@@ -163,15 +173,21 @@ module pwm_axi_regs #(
                 have_aw <= 1'b0;
                 have_w  <= 1'b0;
                 bvalid  <= 1'b1;
+                bresp   <= 2'b00;
                 case (wr_addr[3:2])
                     REG_CTRL: begin
                         enable_o   <= wr_val[0];
                         freq_sel_o <= wr_val[2:1];
                         gates_en_o <= wr_val[4];
+                        sync_arm_o <= wr_val[0] && wr_val[7] && !wr_val[4];
                     end
                     REG_DUTY:  duty_o       <= sat_duty(wr_val[15:0]);
                     REG_DEAD:  dead_time_o  <= sat_dead(wr_val);
-                    REG_PHASE: sync_phase_o <= wr_val[13:0];
+                    REG_PHASE: begin
+                        if (!enable_o && !gates_on_i && wr_val[31:14]==0 &&
+                            wr_val[13:0]<phase_limit_i) sync_phase_o <= wr_val[13:0];
+                        else bresp <= 2'b10;
+                    end
                     default: ;
                 endcase
             end else if (bvalid && bready) begin
@@ -180,6 +196,7 @@ module pwm_axi_regs #(
 
             // La falla domina sobre una escritura simultanea
             if (fault_i) gates_en_o <= 1'b0;
+            if (sync_done_i) sync_arm_o <= 1'b0;
         end
     end
 

@@ -12,8 +12,8 @@
 //                  capacitor bootstrap del IR2110 antes del primer pulso alto.
 //                  Ademas, al liberar las compuertas se mantienen los dos
 //                  inferiores encendidos PRECHARGE_CYC ciclos (precarga).
-// - sync_start_i : flanco de subida -> carga la portadora en sync_phase_i,
-//                  solo mientras las compuertas estan bloqueadas (contrato C4).
+// - sync_start_i : primer flanco tras sync_arm_i -> carga sync_phase_i,
+//                  solo con compuertas bloqueadas. Se rearma al detener PWM.
 // - fault_i      : falla externa (asincrona). Bloquea las compuertas.
 // -----------------------------------------------------------------------------
 `timescale 1ns / 1ps
@@ -32,6 +32,7 @@ module pwm_core #(
     // Configuracion desde los registros AXI
     input  logic               enable_i,
     input  logic               gates_en_i,
+    input  logic               sync_arm_i,
     input  logic        [1:0]  freq_sel_i,
     input  logic signed [15:0] duty_i,
     input  logic        [9:0]  dead_time_i,
@@ -48,7 +49,11 @@ module pwm_core #(
     // Estado hacia los registros AXI
     output logic               running_o,
     output logic               gates_on_o,
-    output logic               fault_o
+    output logic               fault_o,
+    output logic               sync_done_o,
+    output logic               precharge_o,
+    output logic               power_ready_o,
+    output logic [13:0]        phase_limit_o
 );
 
     // ---------------- Registros sombra ----------------
@@ -67,6 +72,7 @@ module pwm_core #(
             default: n_sel = N_11;
         endcase
     end
+    assign phase_limit_o = n_sel;
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin
@@ -100,7 +106,13 @@ module pwm_core #(
         else        sync_prev <= sync_start_i;
     end
     // Solo se acepta con las compuertas bloqueadas, para no generar pulsos raros
-    assign sync_load = sync_start_i && !sync_prev && !gates_on_o;
+    assign sync_load = enable_i && running_o && sync_arm_i && !sync_done_o &&
+                       sync_start_i && !sync_prev && !gates_en_i && !gates_on_o &&
+                       sync_phase_i<n_sh;
+    always_ff @(posedge clk) begin
+        if (!rst_n || !enable_i) sync_done_o <= 1'b0;
+        else if (sync_load) sync_done_o <= 1'b1;
+    end
 
     // ---------------- Control de compuertas ----------------
     logic block;  // condicion de bloqueo inmediato
@@ -154,6 +166,8 @@ module pwm_core #(
         end
     end
     assign precharge = allow && (!gates_on_q || pre_cnt != 0);
+    assign precharge_o = precharge;
+    assign power_ready_o = allow && !precharge;
 
     logic ah, al, bh, bl;
     pwm_deadtime u_dt_a (
