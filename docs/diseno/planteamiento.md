@@ -283,7 +283,7 @@ Para cumplir el contrato C4 (sección 10), acordado con firmware, el PWM separa 
 | `s_axi_aresetn` | 1 bit | Entrada | Reset activo en bajo. |
 | Canales AW, W y AR | — | Entrada | Dirección y datos de escritura y lectura del bus AXI4-Lite. |
 | `s_axi_bready`, `s_axi_rready` | 1 bit | Entrada | El MicroBlaze V acepta la respuesta de escritura o el dato leído. |
-| `sync_start_i` | 1 bit | Entrada | Pulso `generateout0` del AXI Timer. Carga la portadora en `SYNC_PHASE` (contrato C4). |
+| `sync_start_i` | 1 bit | Entrada | Pulso `generateout0` del AXI Timer. Con `sync_arm` activo, su primer flanco carga la portadora en `SYNC_PHASE` (contrato C4). |
 | `fault_i` | 1 bit | Entrada | Falla externa de la etapa de potencia, activa en alto. Se conecta a 0 si no se usa. |
 
 #### Señales de salida
@@ -293,7 +293,8 @@ Para cumplir el contrato C4 (sección 10), acordado con firmware, el PWM separa 
 | Canales B y R, `awready`, `wready`, `arready` | — | Salida | Respuestas del esclavo AXI4-Lite. |
 | `gate_ah_o`, `gate_al_o` | 1 bit | Salida | Compuertas alta y baja de la pierna A. |
 | `gate_bh_o`, `gate_bl_o` | 1 bit | Salida | Compuertas alta y baja de la pierna B. |
-| `pwm_trigger_o` | 1 bit | Salida | Pulso de sincronización hacia el ADC. |
+| `pwm_trigger_o` | 1 bit | Salida | Pulso en cada valle de la portadora (diagnóstico). |
+| `adc_trigger_o` | 1 bit | Salida | Igual a `pwm_trigger_o`, pero solo después de sincronizar con el Timer (`sync_done` = 1). Es el que se conecta a la interfaz ADC. |
 
 #### Señales internas relevantes
 
@@ -521,7 +522,7 @@ stateDiagram-v2
 | `W_IDLE` | 1 | 1 | 0 |
 | `W_HAVE_AW` | 0 | 1 | 0 |
 | `W_HAVE_W` | 1 | 0 | 0 |
-| `W_RESP` | 0 | 0 | 1 (con `BRESP = OKAY`) |
+| `W_RESP` | 0 | 0 | 1 (`BRESP = OKAY`, o `SLVERR` si se rechaza SYNC_PHASE) |
 
 | Estado | `ARREADY` | `RVALID` |
 |---|:---:|:---:|
@@ -556,7 +557,7 @@ Todos los registros vuelven a 0, excepto DEADTIME, que arranca en 100 ciclos (1 
 
 #### Casos especiales y condiciones de borde
 
-Escribir en los bits de solo lectura (`running`, `gates_on`, `fault`) no tiene efecto, y los bits reservados se leen como 0. Si hay una falla, el hardware borra `gates_en`. Aunque la falla desaparezca, las compuertas no vuelven a conmutar hasta que el software escriba `gates_en` = 1 otra vez. Si la falla y una escritura de `gates_en` = 1 llegan en el mismo ciclo, gana la falla.
+Escribir en los bits de solo lectura (`running`, `gates_on`, `fault`, `sync_done`, `precharge`, `power_ready`) no tiene efecto, y los bits reservados se leen como 0. Una escritura a SYNC_PHASE con el PWM habilitado, con las compuertas activas o con un valor mayor o igual que N se rechaza: el registro no cambia y la respuesta es `SLVERR`. Si hay una falla, el hardware borra `gates_en`. Aunque la falla desaparezca, las compuertas no vuelven a conmutar hasta que el software escriba `gates_en` = 1 otra vez. Si la falla y una escritura de `gates_en` = 1 llegan en el mismo ciclo, gana la falla.
 
 #### Estrategia de validación
 
@@ -576,7 +577,7 @@ Generar la portadora triangular que usan las dos piernas, con la frecuencia que 
 |---|---|---|
 | `enable` | Entrada | Habilita el generador. |
 | `N` | Entrada | Valor máximo de la portadora, según `freq_sel`. |
-| `sync_load`, `sync_phase` | Entrada | Carga de fase: flanco de `sync_start_i` con las compuertas bloqueadas. |
+| `sync_load`, `sync_phase` | Entrada | Carga de fase: primer flanco de `sync_start_i` después de armar `sync_arm`, con las compuertas bloqueadas. |
 | `c` | Salida | Valor actual de la portadora (14 bits). |
 | `valley` | Salida | Pulso cuando `c = 0`. |
 | `peak` | Salida | Pulso cuando `c = N`. |
@@ -605,7 +606,9 @@ Como la modulación es unipolar, cada transistor conmuta a $f_{sw}$, pero la ten
 
 Cuando `enable` pasa a 1, el contador arranca desde 0 y `running` se pone en 1. Cuando `enable` pasa a 0, el contador se detiene, `running` vuelve a 0 y las compuertas se apagan de inmediato.
 
-Cuando llega un flanco de `sync_start_i` y las compuertas están bloqueadas, el contador salta a `sync_phase` y sigue subiendo desde ahí. Con el valor de reset (1000) y a 20 kHz, la interrupción del Timer queda 10 µs después del valle, como pide la sección 9.2.3. Como el Timer y el PWM usan el mismo reloj y el mismo período de 5000 ciclos, los pulsos siguientes de `generateout0` llegan justo cuando la portadora ya vale 1000, así que la recarga no produce saltos ni deriva.
+La sincronización con el Timer se hace una sola vez. El firmware arma la carga escribiendo `sync_arm` = 1 junto con `enable` = 1 y `gates_en` = 0. Con el primer flanco de `sync_start_i`, el contador salta a `sync_phase` y sigue subiendo desde ahí, `sync_done` pasa a 1 y `sync_arm` se borra solo. Los pulsos siguientes de `generateout0` se ignoran. Como el Timer y el PWM usan el mismo reloj y el mismo período, quedan alineados sin necesidad de recargar. Con el valor de reset (1000) y a 20 kHz, la interrupción del Timer queda 10 µs después del valle, como pide la sección 9.2.3. `sync_done` vuelve a 0 cuando se deshabilita el PWM, y para sincronizar otra vez hay que volver a armar.
+
+Mientras `sync_done` = 0, el trigger hacia el ADC (`adc_trigger_o`) está bloqueado, para que el firmware no reciba muestras tomadas antes de quedar en fase. La salida `pwm_trigger_o` sigue disponible como señal de diagnóstico.
 
 #### Diseño y justificación técnica
 
@@ -623,7 +626,7 @@ El contador queda en 0, `running` en 0 y no hay pulsos de `valley`.
 
 Si se cambia `freq_sel` con el PWM funcionando, el nuevo valor de N se aplica en el siguiente valle, nunca a mitad de un período.
 
-Si `sync_phase` es mayor o igual que N, la portadora se carga en N y empieza a bajar. Con las compuertas activas, `sync_start_i` se ignora.
+`sync_phase` debe ser menor que N; los valores mayores se rechazan al escribirlos (ver 7.1). Con `gates_en` = 1 o con las compuertas activas, `sync_start_i` se ignora y `sync_arm` no se puede armar.
 
 #### Estrategia de validación
 
@@ -923,7 +926,11 @@ Los offsets son relativos a la dirección base que asigne Vivado. Los registros 
 | 4 | `gates_en` | R/W | 1 libera las compuertas en el siguiente pico, con 20 µs de precarga del bootstrap. 0 las apaga de inmediato. Una falla lo borra. |
 | 5 | `gates_on` | Solo lectura | 1 si las compuertas están conmutando. |
 | 6 | `fault` | Solo lectura | Estado de la entrada `fault_i`. |
-| 31:7 | — | Reservado | Se leen como 0. |
+| 7 | `sync_arm` | R/W | 1 arma la sincronización con el Timer. Solo se arma si en la misma escritura `enable` = 1 y `gates_en` = 0. Se borra solo al sincronizar. |
+| 8 | `sync_done` | Solo lectura | 1 cuando ya se sincronizó con `sync_start_i`. Vuelve a 0 al deshabilitar el PWM. |
+| 9 | `precharge` | Solo lectura | 1 durante la precarga del bootstrap. |
+| 10 | `power_ready` | Solo lectura | 1 cuando las compuertas conmutan normalmente (terminó la precarga). |
+| 31:11 | — | Reservado | Se leen como 0. |
 
 **0x04 — DUTY_REF** (reset `0x0000_0000`)
 
@@ -943,12 +950,12 @@ Los offsets son relativos a la dirección base que asigne Vivado. Los registros 
 
 | Bits | Campo | Acceso | Descripción |
 |---|---|---|---|
-| 13:0 | `sync_phase` | R/W | Posición en la que se carga la portadora (subiendo) al recibir `sync_start_i`. Reset en 1000 (10 µs a 20 kHz). |
+| 13:0 | `sync_phase` | R/W | Posición en la que se carga la portadora (subiendo) al sincronizar. Reset en 1000 (10 µs a 20 kHz). Solo se puede escribir con el PWM deshabilitado y con un valor menor que N; si no, la escritura responde `SLVERR`. |
 | 31:14 | — | Reservado | Se leen como 0. |
 
 Los cambios en `freq_sel`, `duty_ref` y `dead_time` se aplican en el siguiente valle de la portadora.
 
-Secuencia de uso desde el firmware: escribir DUTY_REF, DEADTIME y SYNC_PHASE; escribir CTRL_STATUS con `enable` = 1 y `gates_en` = 0 (WARMUP); arrancar el AXI Timer, cuyo primer `generateout0` alinea la portadora; y al pasar a RUNNING, escribir `gates_en` = 1. Para detener el puente H basta con `gates_en` = 0, sin perder la sincronización.
+Secuencia de uso desde el firmware: con el PWM deshabilitado, escribir DUTY_REF, DEADTIME y SYNC_PHASE; escribir CTRL_STATUS con `enable` = 1, `sync_arm` = 1 y `gates_en` = 0 (WARMUP); arrancar el AXI Timer, cuyo primer `generateout0` alinea la portadora (`sync_done` = 1); y al pasar a RUNNING, escribir `gates_en` = 1 y esperar `power_ready` = 1. Para detener el puente H basta con `gates_en` = 0, sin perder la sincronización.
 
 ### 8.3 Registros de la interfaz ADC/XADC
 
@@ -1469,9 +1476,9 @@ Los casos siguientes definen el plan de validación. Su ejecución y los resulta
 | T8 | Trigger | Un pulso por período, alineado con el valle. Ninguno si el PWM está deshabilitado. |
 | T9 | Enable | Al deshabilitar, las compuertas se apagan de inmediato y `running` pasa a 0. |
 | T10 | `gates_en` | Con `gates_en` = 0 la portadora y el trigger corren y las compuertas quedan en 0. Al activarlo, las compuertas se liberan en el pico. Al desactivarlo, se apagan de inmediato. |
-| T11 | `sync_start_i` | La portadora se carga en SYNC_PHASE. Los pulsos periódicos no producen saltos. Se ignora con las compuertas activas. |
+| T11 | `sync_start_i` y `sync_arm` | Sin armar, el pulso se ignora. Armado, la portadora se carga una sola vez en SYNC_PHASE y `sync_done` = 1. `adc_trigger_o` solo sale después de sincronizar. SYNC_PHASE responde `SLVERR` con el PWM corriendo o con un valor mayor o igual que N. |
 | T12 | `fault_i` | Las compuertas se apagan, `gates_en` se borra y no se rearma solo al quitar la falla. |
-| T13 | Arranque con bootstrap | Para m = 0, 0,445 y 0,95, los MOSFET inferiores encienden primero y conducen al menos 20 µs antes del primer pulso superior. |
+| T13 | Arranque con bootstrap | Para m = 0, 0,445 y 0,95, los MOSFET inferiores encienden primero y conducen al menos 20 µs antes del primer pulso superior. `precharge` y `power_ready` reflejan el estado. |
 
 La misma simulación se corre después sobre el diseño ya implementado (simulación post-implementación temporizada).
 

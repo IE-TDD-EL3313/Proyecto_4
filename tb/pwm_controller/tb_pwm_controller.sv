@@ -23,7 +23,7 @@ module tb_pwm_controller;
     logic [3:0]  wstrb;
     logic [1:0]  bresp, rresp;
     logic        sync_start, fault;
-    logic        gate_ah, gate_al, gate_bh, gate_bl, trig;
+    logic        gate_ah, gate_al, gate_bh, gate_bl, trig, adc_trig;
 
     pwm_controller_axi dut (
         .s_axi_aclk    (clk),
@@ -53,7 +53,8 @@ module tb_pwm_controller;
         .gate_al_o     (gate_al),
         .gate_bh_o     (gate_bh),
         .gate_bl_o     (gate_bl),
-        .pwm_trigger_o (trig)
+        .pwm_trigger_o (trig),
+        .adc_trigger_o (adc_trig)
     );
 
     // Senales internas usadas como referencia por el testbench
@@ -196,6 +197,15 @@ module tb_pwm_controller;
         end
     end
 
+    // Flancos de subida de pwm_trigger_o y adc_trigger_o (para T11)
+    int n_trig_rise = 0, n_adc_rise = 0;
+    logic adc_q = 0;
+    always @(posedge clk) begin
+        adc_q <= adc_trig;
+        if (trig && !trig_q)     n_trig_rise++;
+        if (adc_trig && !adc_q)  n_adc_rise++;
+    end
+
     task automatic next_trig(output longint t);
         longint prev = last_trig_rise;
         int guard = 0;
@@ -265,7 +275,7 @@ module tb_pwm_controller;
         axi_write(A_CTRL, 32'hFFFF_FFFE);  // todo en 1 menos enable
         axi_read(A_CTRL, r);
         check("T2 running (RO) no se puede escribir", r[3] == 1'b0, $sformatf("leido=0x%08h", r));
-        check("T2 bits reservados se leen en 0", r[31:7] == 0, $sformatf("leido=0x%08h", r));
+        check("T2 bits reservados se leen en 0", r[31:11] == 0, $sformatf("leido=0x%08h", r));
         check("T2 gates_en escribible", r[4] == 1'b1, $sformatf("leido=0x%08h", r));
         axi_write(A_CTRL, 32'h0);
         axi_write(A_DUTY, 32'h0000_1234, 4'hF, 1);       // AW primero
@@ -433,8 +443,37 @@ module tb_pwm_controller;
         check("T10 trigger sigue despues del bloqueo", last_trig_rise != t0, "");
 
         // ---------------- T11: sync_start_i ----------------
-        $display("\nT11 - sync_start_i (arranque en fase con el AXI Timer)");
-        // enable=1, gates_en=0, 20 kHz, SYNC_PHASE = 1000
+        $display("\nT11 - sync_start_i (arranque en fase con el AXI Timer, armado con sync_arm)");
+        // La fase solo se escribe con el PWM detenido
+        axi_write(A_CTRL, 32'h04);                       // enable = 0, 20 kHz
+        axi_write(A_PHASE, 32'd1000);
+        check("T11 SYNC_PHASE con PWM detenido: OKAY", bresp == 2'b00, $sformatf("bresp=%b", bresp));
+        // Sin sync_arm el pulso se ignora
+        axi_write(A_CTRL, 32'h05);                       // enable, 20 kHz, sin armar
+        wait_periods(1);
+        repeat (333) @(posedge clk);
+        @(negedge clk); n = c; sync_start = 1'b1;
+        @(negedge clk); sync_start = 1'b0;
+        check("T11 sin sync_arm el pulso se ignora", c != 1000 && (c == n + 1 || c == n - 1),
+              $sformatf("antes=%0d despues=%0d", n, c));
+        // Con el PWM corriendo, escribir la fase da error y no la cambia
+        axi_write(A_PHASE, 32'd1500);
+        check("T11 SYNC_PHASE con PWM corriendo: SLVERR", bresp == 2'b10, $sformatf("bresp=%b", bresp));
+        axi_read(A_PHASE, r);
+        check("T11 SYNC_PHASE no cambia tras SLVERR", r == 32'd1000, $sformatf("leido=%0d", r));
+        // Fase fuera de rango (>= N) con el PWM detenido
+        axi_write(A_CTRL, 32'h04);
+        axi_write(A_PHASE, 32'd3000);
+        check("T11 SYNC_PHASE >= N: SLVERR", bresp == 2'b10, $sformatf("bresp=%b", bresp));
+        // Armar y sincronizar: enable + sync_arm (bit 7), gates_en = 0
+        axi_write(A_CTRL, 32'h85);
+        axi_read(A_CTRL, r);
+        check("T11 sync_arm = 1 y sync_done = 0 al armar", r[7] == 1'b1 && r[8] == 1'b0, $sformatf("CTRL=0x%08h", r));
+        wait_periods(1);
+        n_trig_rise = 0; n_adc_rise = 0;
+        wait_periods(2);
+        check("T11 adc_trigger_o bloqueado antes de sincronizar", n_trig_rise >= 2 && n_adc_rise == 0,
+              $sformatf("pwm_trigger=%0d adc_trigger=%0d", n_trig_rise, n_adc_rise));
         repeat (333) @(posedge clk);
         @(negedge clk); sync_start = 1'b1;
         @(negedge clk); sync_start = 1'b0;
@@ -444,31 +483,44 @@ module tb_pwm_controller;
         while (c != 0 && cnt < 10000) begin @(negedge clk); cnt++; end
         check("T11 valle 4000 ciclos despues (1500 subiendo + 2500 bajando)", cnt == 4000,
               $sformatf("medido=%0d", cnt));
-        // Pulsos periodicos cada 5000 ciclos: la portadora no debe saltar
+        axi_read(A_CTRL, r);
+        check("T11 sync_done = 1 y sync_arm se borra", r[8] == 1'b1 && r[7] == 1'b0, $sformatf("CTRL=0x%08h", r));
+        // Despues de sincronizar, los pulsos siguientes se ignoran (sin saltos)
         ok = 1;
-        for (int k = 0; k < 4; k++) begin
-            while (cycle < t0 + 5000 * (k + 1) - 1) @(negedge clk);
-            sync_start = 1'b1;
-            if (c != 999) ok = 0;               // valor natural antes de recargar
+        for (int k = 0; k < 3; k++) begin
+            repeat (1234) @(negedge clk);
+            n = c; sync_start = 1'b1;
             @(negedge clk); sync_start = 1'b0;
-            if (c != 1000) ok = 0;
+            if (!(c == n + 1 || c == n - 1)) ok = 0;
         end
-        check("T11 pulsos periodicos sin salto ni deriva", ok, $sformatf("c=%0d", c));
-        // Con compuertas activas sync_start_i se ignora
-        axi_write(A_CTRL, 32'h15);
+        check("T11 pulsos posteriores ignorados (una sola carga)", ok, $sformatf("c=%0d", c));
+        n_trig_rise = 0; n_adc_rise = 0;
+        wait_periods(3);
+        check("T11 adc_trigger_o igual a pwm_trigger_o tras sincronizar", n_adc_rise == n_trig_rise && n_adc_rise >= 3,
+              $sformatf("pwm_trigger=%0d adc_trigger=%0d", n_trig_rise, n_adc_rise));
+        // Con compuertas activas sync_start_i se ignora aunque se intente rearmar
+        axi_write(A_CTRL, 32'h95);                       // enable + gates_en + sync_arm
+        axi_read(A_CTRL, r);
+        check("T11 sync_arm no se arma con gates_en = 1", r[7] == 1'b0, $sformatf("CTRL=0x%08h", r));
         wait_periods(2);
         repeat (100) @(posedge clk);
         @(negedge clk); n = c; sync_start = 1'b1;
         @(negedge clk); sync_start = 1'b0;
-        check("T11 ignorado con compuertas activas", c != 1000 && (c == n + 1 || c == n - 1),
+        check("T11 ignorado con compuertas activas", c == n + 1 || c == n - 1,
               $sformatf("antes=%0d despues=%0d", n, c));
-        // SYNC_PHASE configurable
-        axi_write(A_CTRL, 32'h05);
+        // SYNC_PHASE configurable: detener, escribir 1234, armar y sincronizar
+        axi_write(A_CTRL, 32'h04);
+        axi_read(A_CTRL, r);
+        check("T11 sync_done se borra al detener el PWM", r[8] == 1'b0, $sformatf("CTRL=0x%08h", r));
         axi_write(A_PHASE, 32'd1234);
+        axi_write(A_CTRL, 32'h85);
+        repeat (777) @(posedge clk);
         @(negedge clk); sync_start = 1'b1;
         @(negedge clk); sync_start = 1'b0;
         check("T11 SYNC_PHASE configurable (1234)", c == 1234, $sformatf("c=%0d", c));
+        axi_write(A_CTRL, 32'h04);
         axi_write(A_PHASE, 32'd1000);
+        axi_write(A_CTRL, 32'h05);
 
         // ---------------- T12: fault_i ----------------
         $display("\nT12 - fault_i");
@@ -501,7 +553,18 @@ module tb_pwm_controller;
             repeat (300 + 700 * k) @(posedge clk);
             first_ah = -1; first_al = -1; first_bh = -1; first_bl = -1;
             axi_write(A_CTRL, 32'h15);          // gates_en = 1
+            if (k == 0) begin
+                while (!gates_on) @(posedge clk);
+                axi_read(A_CTRL, r);
+                check("T13 precharge = 1 y power_ready = 0 durante la precarga",
+                      r[9] == 1'b1 && r[10] == 1'b0, $sformatf("CTRL=0x%08h", r));
+            end
             wait_periods(3);
+            if (k == 0) begin
+                axi_read(A_CTRL, r);
+                check("T13 precharge = 0 y power_ready = 1 al terminar",
+                      r[9] == 1'b0 && r[10] == 1'b1, $sformatf("CTRL=0x%08h", r));
+            end
             ok = first_al > 0 && first_bl > 0 &&
                  (first_ah - first_al) >= 2000 && (first_bh - first_bl) >= 2000;
             check($sformatf("T13 m=%+.3f inferiores >= 20 us antes", d / 32768.0), ok,
