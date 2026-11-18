@@ -48,3 +48,11 @@ set_property IOSTANDARD LVCMOS33 [get_ports {Vaux3_0_v_p}]
 # Entrada analogica negativa
 set_property PACKAGE_PIN A14 [get_ports {Vaux3_0_v_n}]
 set_property IOSTANDARD LVCMOS33 [get_ports {Vaux3_0_v_n}]
+
+# ------------------------------------------------------------
+# 5. Tension del banco de configuracion
+# Nexys 4 Rev. B
+# ------------------------------------------------------------
+
+set_property CFGBVS VCCO [current_design]
+set_property CONFIG_VOLTAGE 3.3 [current_design]
