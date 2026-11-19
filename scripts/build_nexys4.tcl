@@ -90,6 +90,7 @@ set stream [open [file join $out project_path.txt] w]
 puts $stream [file join $scratch p microblaze_v_system.xpr]
 close $stream
 if {$mode ne "validate"} {
+    reset_run synth_1
     launch_runs synth_1 -jobs 2
     wait_on_run synth_1
     if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {error "System synthesis failed"}
