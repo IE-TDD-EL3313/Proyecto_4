@@ -30,6 +30,10 @@ $$
 
 El voltaje promedio en la carga es $\bar v_{AB} = m\,V_{dc}$. Hay dos pulsos por período, así que el rizado de la carga queda en $2f_{sw}$. En el valle y en el pico las dos piernas están en el mismo estado ($v_{AB}=0$), por eso el valle es un buen instante para muestrear la corriente: cae a la mitad de su rizado y lejos de las conmutaciones.
 
+![Formas de onda de la modulación PWM unipolar](../diseno/figuras/ondas_pwm_unipolar.png)
+
+*Figura 0. Modulación unipolar: portadora triangular con los umbrales $th_A$ y $th_B$, señales de cada pierna y voltaje $v_{AB}$ en la carga. En el valle conducen los dos MOSFET superiores y en el pico los dos inferiores, así que en ambos instantes $v_{AB}=0$; los pulsos de $\pm V_{dc}$ aparecen dos veces por período.*
+
 **Tiempo muerto.** El IR2110 no tiene tiempo muerto interno. Si el MOSFET superior y el inferior de una pierna conducen a la vez, la fuente queda en corto (shoot-through). Por eso entre el apagado de uno y el encendido del otro se dejan $t_{dt} = dead\_time \times 10$ ns; PEDP pidió 1 µs. El tiempo muerto le quita ancho a los pulsos, y para que el pulso más corto sobreviva hay que cumplir
 
 $$
