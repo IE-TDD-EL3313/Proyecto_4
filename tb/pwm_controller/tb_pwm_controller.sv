@@ -350,13 +350,13 @@ module tb_pwm_controller;
             n = 2500; tha = th_of(n, d); thb = th_of(n, -d);
             // Con la portadora 0..N..1, c < th dura exactamente 2*th - 1 ciclos
             ok = (per_sa == 2 * tha - 1) && (per_sb == 2 * thb - 1);
-            check($sformatf("T6 m=%+.3f s_a/s_b = 2*th - 1", d / 32768.0), ok,
+            check($sformatf("T6 m=%.3f s_a/s_b = 2*th - 1", d / 32768.0), ok,
                   $sformatf("s_a=%0d (esp %0d)  s_b=%0d (esp %0d)", per_sa, 2 * tha - 1, per_sb, 2 * thb - 1));
             // d_A + d_B = 1 salvo el redondeo de los umbrales (<= 4 ciclos = 0.08 %)
-            check($sformatf("T6 m=%+.3f d_A + d_B = 1", d / 32768.0),
+            check($sformatf("T6 m=%.3f d_A + d_B = 1", d / 32768.0),
                   (per_sa + per_sb >= 2 * n - 4) && (per_sa + per_sb <= 2 * n),
                   $sformatf("suma=%0d de %0d", per_sa + per_sb, 2 * n));
-            check($sformatf("T6 m=%+.3f gate_ah = s_a - dead_time", d / 32768.0),
+            check($sformatf("T6 m=%.3f gate_ah = s_a - dead_time", d / 32768.0),
                   (per_ah >= per_sa - 100 - 1) && (per_ah <= per_sa - 100 + 1),
                   $sformatf("gate_ah=%0d s_a=%0d", per_ah, per_sa));
         end
@@ -567,7 +567,7 @@ module tb_pwm_controller;
             end
             ok = first_al > 0 && first_bl > 0 &&
                  (first_ah - first_al) >= 2000 && (first_bh - first_bl) >= 2000;
-            check($sformatf("T13 m=%+.3f inferiores >= 20 us antes", d / 32768.0), ok,
+            check($sformatf("T13 m=%.3f inferiores >= 20 us antes", d / 32768.0), ok,
                   $sformatf("bajo A->alto A: %0d ciclos (%.1f us), bajo B->alto B: %0d ciclos (%.1f us)",
                             first_ah - first_al, (first_ah - first_al) / 100.0,
                             first_bh - first_bl, (first_bh - first_bl) / 100.0));

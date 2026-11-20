@@ -1,0 +1,71 @@
+Simulacion post-implementacion temporizada - Vivado 2026.1 (xsim) - tb_pwm_controller_post_impl
+Netlist de impl_1 (xc7a100tcsg324-1, 100 MHz) con retardos SDF, esquina slow
+
+launch_simulation -mode post-implementation -type timing
+Command: launch_simulation  -mode post-implementation -type timing
+INFO: [Vivado 12-25911] Executing simulation for 'XSim' simulator
+INFO: [Vivado 12-28535] Process started - Fri Nov 20 14:14:36 2026
+
+INFO: [Vivado 12-12493] Simulation top is 'tb_pwm_controller_post_impl'
+INFO: [Vivado 12-5682] Launching post-implementation timing simulation in 'C:/Users/keylor/Desktop/Pruebas_pwm/Pruebas_pwm.sim/sim_1/impl/timing/xsim'
+INFO: [SIM-utils-51] Simulation object is 'sim_1'
+INFO: [SIM-utils-72] Using boost library from 'C:/AMDDesignTools/2026.1/Vivado/tps/boost_1_72_0'
+INFO: [SIM-utils-31] Writing simulation netlist file for design 'impl_1'...
+INFO: [SIM-utils-32] write_verilog -mode timesim -nolib -sdf_anno true -force -file "C:/Users/keylor/Desktop/Pruebas_pwm/Pruebas_pwm.sim/sim_1/impl/timing/xsim/tb_pwm_controller_post_impl_time_impl.v"
+INFO: [SIM-utils-34] Writing SDF file...
+INFO: [SIM-utils-35] write_sdf -mode timesim -process_corner slow -force -file "C:/Users/keylor/Desktop/Pruebas_pwm/Pruebas_pwm.sim/sim_1/impl/timing/xsim/tb_pwm_controller_post_impl_time_impl.sdf"
+INFO: [SIM-utils-36] Netlist generated:C:/Users/keylor/Desktop/Pruebas_pwm/Pruebas_pwm.sim/sim_1/impl/timing/xsim/tb_pwm_controller_post_impl_time_impl.v
+INFO: [SIM-utils-37] SDF generated:C:/Users/keylor/Desktop/Pruebas_pwm/Pruebas_pwm.sim/sim_1/impl/timing/xsim/tb_pwm_controller_post_impl_time_impl.sdf
+INFO: [XSIM 43-3451] SDF backannotation process started with SDF file "tb_pwm_controller_post_impl_time_impl.sdf", for root module "tb_pwm_controller_post_impl/dut".
+INFO: [XSIM 43-3452] SDF backannotation was successful for SDF file "tb_pwm_controller_post_impl_time_impl.sdf", for root module "tb_pwm_controller_post_impl/dut".
+
+
+==== Testbench post-implementacion PWM Controller ====
+
+P1 - Reset y registros
+  PASS                                P1 CTRL_STATUS = 0 leido=0x00000000
+  PASS                                 P1 DEADTIME = 100 leido=100
+  PASS                              P1 SYNC_PHASE = 1000 leido=1000
+  PASS                     P1 compuertas y triggers en 0 
+  PASS               P1 saturacion duty 0x7FFF -> 0x7999 leido=0x7999
+  PASS              P1 saturacion dead_time 2000 -> 1023 leido=1023
+
+P2 - Frecuencias (periodo de pwm_trigger_o = 2N ciclos)
+INFO: [USF-XSim-96] XSim completed. Design snapshot 'tb_pwm_controller_post_impl_time_impl' loaded.
+INFO: [USF-XSim-97] XSim simulation ran for 1000ns
+launch_simulation: Time (s): cpu = 00:00:12 ; elapsed = 00:00:43 . Memory (MB): peak = 3185.758 ; gain = 0.000
+run all
+  PASS                            P2 freq_sel=0 (10 kHz) esperado=10000 medido=10000
+  PASS                            P2 freq_sel=1 (15 kHz) esperado=6666 medido=6666
+  PASS                            P2 freq_sel=2 (20 kHz) esperado=5000 medido=5000
+
+P3 - Modulacion, tiempo muerto y trigger (20 kHz, m = 0.5)
+  PASS                   P3 ancho de gate_ah por periodo esperado=3649 medido=3649
+  PASS                 P3 tiempo muerto = 1 us (+-10 ns) transiciones=12 min=999.790 ns max=1000.210 ns
+  PASS              P3 ancho de pwm_trigger_o = 4 ciclos ancho=4
+
+P4 - enable y gates_en
+  PASS              P4 gates_en = 0 apaga las compuertas 
+  PASS                 P4 trigger sigue con gates_en = 0 triggers=2
+  PASS        P4 enable = 0 detiene el trigger y running CTRL=0x00000004
+
+P5 - Sincronizacion (sync_arm, sync_start_i, adc_trigger_o)
+  PASS   P5 adc_trigger_o bloqueado antes de sincronizar pwm=3 adc=0
+  PASS     P5 trigger a 4001 ciclos del sync (fase 1000) medido=4003
+  PASS                   P5 sync_done = 1 y sync_arm = 0 CTRL=0x0000010d
+  PASS  P5 adc_trigger_o = pwm_trigger_o tras sincronizar pwm=3 adc=3
+
+P6 - Arranque con precarga del bootstrap
+  PASS              P6 precharge = 1 durante la precarga CTRL=0x0000033d
+  PASS       P6 inferiores >= 20 us antes que superiores A: 2101 ciclos, B: 2100 ciclos
+  PASS                    P6 power_ready = 1 al terminar CTRL=0x0000053d
+
+P7 - fault_i
+  PASS                  P7 compuertas en 0 tras la falla 
+  PASS               P7 bit fault = 1 y gates_en borrado CTRL=0x0000014d
+  PASS                         Global: sin shoot-through eventos=0
+
+==== Resumen post-implementacion: 25 pruebas, 25 PASS, 0 FAIL ====
+
+$finish called at time : 1792570 ns : File "C:/Users/keylor/Desktop/Taller diseño/Proyectos/Proyecto_4/Proyecto_4/tb/pwm_controller/tb_pwm_controller_post_impl.sv" Line 282
+run: Time (s): cpu = 00:01:17 ; elapsed = 00:04:42 . Memory (MB): peak = 3185.758 ; gain = 0.000
