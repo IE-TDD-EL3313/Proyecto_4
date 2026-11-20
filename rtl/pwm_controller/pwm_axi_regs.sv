@@ -14,13 +14,14 @@
 //
 // - AW y W se aceptan en cualquier orden. SYNC_PHASE invalido devuelve SLVERR.
 // - La fase solo cambia con portadora detenida y debe ser menor que N.
-// - Direcciones no mapeadas: lectura 0, escritura ignorada.
+// - 0x10 DUTY_LATCHED: Q1.15 [15:0], valido [16], solo lectura.
+// - Direcciones no mapeadas/no alineadas y escrituras RO: SLVERR.
 // - Una falla (fault) borra gates_en: el software debe volver a habilitarlas.
 // -----------------------------------------------------------------------------
 `timescale 1ns / 1ps
 
 module pwm_axi_regs #(
-    parameter int                 ADDR_W      = 4,
+    parameter int                 ADDR_W      = 5,
     parameter logic signed [15:0] DUTY_MAX    = 16'sd31129,  // ~0.95 en Q1.15
     parameter logic        [9:0]  DT_MIN      = 10'd20,
     parameter logic        [9:0]  DT_MAX      = 10'd1023,
@@ -66,13 +67,17 @@ module pwm_axi_regs #(
     input  logic                sync_done_i,
     input  logic                precharge_i,
     input  logic                power_ready_i,
+    input  logic signed [15:0]  duty_latched_i,
+    input  logic                duty_valid_i,
     input  logic [13:0]         phase_limit_i
 );
 
-    localparam logic [1:0] REG_CTRL  = 2'd0;
-    localparam logic [1:0] REG_DUTY  = 2'd1;
-    localparam logic [1:0] REG_DEAD  = 2'd2;
-    localparam logic [1:0] REG_PHASE = 2'd3;
+    localparam logic [2:0] REG_CTRL  = 3'd0;
+    localparam logic [2:0] REG_DUTY  = 3'd1;
+    localparam logic [2:0] REG_DEAD  = 3'd2;
+    localparam logic [2:0] REG_PHASE = 3'd3;
+
+    localparam logic [2:0] REG_LATCHED = 3'd4;
 
     // ---------------- Vista de 32 bits de cada registro ----------------
     logic [31:0] view_ctrl, view_duty, view_dead, view_phase;
@@ -83,20 +88,23 @@ module pwm_axi_regs #(
     assign view_phase = {18'd0, sync_phase_o};
 
     logic [31:0] view_wr, view_rd;  // registro direccionado en escritura y lectura
-    logic [1:0]  idx_wr, idx_rd;
-    assign idx_rd = araddr[3:2];
+    logic [2:0]  idx_wr, idx_rd;
+    assign idx_rd = araddr[4:2];
     always_comb begin
         case (idx_wr)
             REG_CTRL: view_wr = view_ctrl;
             REG_DUTY: view_wr = view_duty;
             REG_DEAD: view_wr = view_dead;
-            default:  view_wr = view_phase;
+            REG_PHASE: view_wr = view_phase;
+            default: view_wr = 0;
         endcase
         case (idx_rd)
             REG_CTRL: view_rd = view_ctrl;
             REG_DUTY: view_rd = view_duty;
             REG_DEAD: view_rd = view_dead;
-            default:  view_rd = view_phase;
+            REG_PHASE: view_rd = view_phase;
+            REG_LATCHED: view_rd = {15'd0,duty_valid_i,duty_latched_i};
+            default: view_rd = 0;
         endcase
     end
 
@@ -139,7 +147,7 @@ module pwm_axi_regs #(
     assign wr_data  = have_w  ? w_data_q  : wdata;
     assign wr_strb  = have_w  ? w_strb_q  : wstrb;
     assign do_write = (have_aw || aw_hs) && (have_w || w_hs) && !bvalid;
-    assign idx_wr   = wr_addr[3:2];
+    assign idx_wr   = wr_addr[4:2];
     assign wr_val   = apply_strb(view_wr, wr_data, wr_strb);
 
     always_ff @(posedge clk) begin
@@ -174,7 +182,8 @@ module pwm_axi_regs #(
                 have_w  <= 1'b0;
                 bvalid  <= 1'b1;
                 bresp   <= 2'b00;
-                case (wr_addr[3:2])
+                if (wr_addr[1:0]!=0 || (wr_addr >> 5)!=0) bresp <= 2'b10;
+                else case (idx_wr)
                     REG_CTRL: begin
                         enable_o   <= wr_val[0];
                         freq_sel_o <= wr_val[2:1];
@@ -188,7 +197,7 @@ module pwm_axi_regs #(
                             wr_val[13:0]<phase_limit_i) sync_phase_o <= wr_val[13:0];
                         else bresp <= 2'b10;
                     end
-                    default: ;
+                    default: bresp <= 2'b10;
                 endcase
             end else if (bvalid && bready) begin
                 bvalid <= 1'b0;
@@ -202,15 +211,16 @@ module pwm_axi_regs #(
 
     // ---------------- Canal de lectura ----------------
     assign arready = !rvalid;
-    assign rresp   = 2'b00;  // OKAY
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             rvalid <= 1'b0;
             rdata  <= '0;
+            rresp  <= 2'b00;
         end else if (arvalid && arready) begin
             rvalid <= 1'b1;
             rdata  <= view_rd;
+            rresp  <= (araddr[1:0]!=0 || (araddr >> 5)!=0 || idx_rd>REG_LATCHED) ? 2'b10 : 2'b00;
         end else if (rvalid && rready) begin
             rvalid <= 1'b0;
         end

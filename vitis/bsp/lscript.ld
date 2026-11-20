@@ -3,15 +3,17 @@
 * SPDX-License-Identifier: MIT
 ******************************************************************************/
 
-_STACK_SIZE = DEFINED(_STACK_SIZE) ? _STACK_SIZE : 0x400;
-_HEAP_SIZE = DEFINED(_HEAP_SIZE) ? _HEAP_SIZE : 0x800;
+_STACK_SIZE = DEFINED(_STACK_SIZE) ? _STACK_SIZE : 0x2000;
+_HEAP_SIZE = DEFINED(_HEAP_SIZE) ? _HEAP_SIZE : 0x1000;
 
-/* Define Memories in the system */
+/* Integrated XSA: shared 128 KiB LMB for instructions and data.
+ * The base project must first be rebuilt with scripts/build_nexys4.tcl.
+ * AXI BRAM at 0x10000000 has no data route and is not used here.
+ * Automated builders use the linker generated from the integrated XSA. */
 
 MEMORY
 {
-	axi_bram_ctrl_0_memory_0 : ORIGIN = 0x10000000, LENGTH = 0x8000
-	microblaze_riscv_0_local_memory_dlmb_bram_if_cntlr_memory_0 : ORIGIN = 0x0, LENGTH = 0x8000
+	microblaze_riscv_0_local_memory_dlmb_bram_if_cntlr_memory_0 : ORIGIN = 0x0, LENGTH = 0x20000
 }
 
 /* Specify the default entry point to the program */
@@ -160,16 +162,6 @@ SECTIONS
    *(.gnu.linkonce.tb.*)
    __tbss_end = .;
 } > microblaze_riscv_0_local_memory_dlmb_bram_if_cntlr_memory_0
-
-/* Runtime del controlador almacenado en BRAM AXI */
-.axi_runtime (NOLOAD) : {
-   . = ALIGN(8);
-   __axi_runtime_start = .;
-   KEEP(*(.axi_runtime))
-   KEEP(*(.axi_runtime.*))
-   . = ALIGN(8);
-   __axi_runtime_end = .;
-} > axi_bram_ctrl_0_memory_0
 
 .bss (NOLOAD) : {
    __bss_start = .;

@@ -17,7 +17,7 @@
 
 module pwm_controller_axi #(
     parameter int                 C_S_AXI_DATA_WIDTH = 32,
-    parameter int                 C_S_AXI_ADDR_WIDTH = 4,
+    parameter int                 C_S_AXI_ADDR_WIDTH = 5,
     parameter logic        [13:0] N_00            = 14'd5000,   // 10 kHz
     parameter logic        [13:0] N_01            = 14'd3333,   // 15 kHz (15.0015 kHz)
     parameter logic        [13:0] N_10            = 14'd2500,   // 20 kHz
@@ -36,7 +36,7 @@ module pwm_controller_axi #(
     input  logic                            s_axi_aclk,
     input  logic                            s_axi_aresetn,
     // AXI4-Lite esclavo
-    (* X_INTERFACE_PARAMETER = "XIL_INTERFACENAME s_axi, PROTOCOL AXI4LITE, DATA_WIDTH 32, ADDR_WIDTH 4, READ_WRITE_MODE READ_WRITE" *)
+    (* X_INTERFACE_PARAMETER = "XIL_INTERFACENAME s_axi, PROTOCOL AXI4LITE, DATA_WIDTH 32, ADDR_WIDTH 5, READ_WRITE_MODE READ_WRITE" *)
     input  logic [C_S_AXI_ADDR_WIDTH-1:0]   s_axi_awaddr,
     input  logic [2:0]                      s_axi_awprot,
     input  logic                            s_axi_awvalid,
@@ -71,6 +71,8 @@ module pwm_controller_axi #(
     logic               enable, gates_en, running, gates_on, fault;
     logic               sync_arm, sync_done, precharge, power_ready;
     logic [13:0]        phase_limit;
+    logic signed [15:0] duty_latched;
+    logic duty_valid;
     // Diagnostic PWM trigger remains available; acquisition sees only post-sync events.
     assign adc_trigger_o = pwm_trigger_o && sync_done;
     logic        [1:0]  freq_sel;
@@ -118,6 +120,8 @@ module pwm_controller_axi #(
         .sync_done_i  (sync_done),
         .precharge_i  (precharge),
         .power_ready_i(power_ready),
+        .duty_latched_i(duty_latched),
+        .duty_valid_i (duty_valid),
         .phase_limit_i(phase_limit)
     );
 
@@ -152,6 +156,8 @@ module pwm_controller_axi #(
         .sync_done_o   (sync_done),
         .precharge_o   (precharge),
         .power_ready_o (power_ready),
+        .duty_latched_o(duty_latched),
+        .duty_valid_o  (duty_valid),
         .phase_limit_o (phase_limit)
     );
 

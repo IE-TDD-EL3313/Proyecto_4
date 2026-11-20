@@ -69,6 +69,10 @@ void tdd_runtime_irq(struct tdd_runtime *rt)
                           rt->control.fault==TDD_FAULT_SEQUENCE || rt->control.fault==TDD_FAULT_TIME);
         goto done;
     }
+    int16_t latched;
+    if (!tdd_pwm_read_latched(&rt->io.pwm,&latched)) {
+        runtime_fault(rt,TDD_FAULT_CONFIG,false); goto done;
+    }
     uint32_t age=ticks(rt)-sample.ticks;
     if (age>=rt->latch_age_ticks-rt->write_budget_ticks-rt->margin_ticks) {
         runtime_fault(rt,TDD_FAULT_TIME,false); goto done;
@@ -92,7 +96,8 @@ void tdd_runtime_irq(struct tdd_runtime *rt)
         rt->control.phase=0; /* phase starts with confirmed power readiness */
     }
     if (rt->control.state==TDD_RUNNING &&
-        !tdd_capture_push(&rt->capture,sample.raw,out.reference_a,sample.seq,sample.ticks))
+        !tdd_capture_push(&rt->capture,sample.raw,out.reference_a,sample.seq,sample.ticks,
+                          out.volts,out.duty_q15,latched))
         runtime_fault(rt,TDD_FAULT_ADC,true);
 done:
     {

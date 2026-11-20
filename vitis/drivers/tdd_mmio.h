@@ -14,6 +14,7 @@ enum tdd_adc_result tdd_adc_read(const struct tdd_bus *bus, struct tdd_sample *o
 /* Duty/disable, one-shot carrier arming and peak/precharge gate control. */
 void tdd_pwm_disable(const struct tdd_bus *bus, uint32_t frequency_code);
 bool tdd_pwm_write_duty(const struct tdd_bus *bus, int16_t duty);
+bool tdd_pwm_read_latched(const struct tdd_bus *bus, int16_t *duty);
 uint32_t tdd_pwm_period(uint32_t frequency_code);
 bool tdd_pwm_configure(const struct tdd_bus *bus, uint32_t frequency_code,
                        uint32_t deadtime, uint32_t phase);

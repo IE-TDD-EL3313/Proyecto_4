@@ -3,9 +3,9 @@
 #include <float.h>
 #include <math.h>
 #include <string.h>
-_Static_assert(sizeof(struct tdd_record)==4,"record layout must be four bytes");
+_Static_assert(sizeof(struct tdd_record)==12,"record layout must be twelve bytes");
 _Static_assert(sizeof(float)==4 && FLT_RADIX==2 && FLT_MANT_DIG==24 && FLT_MAX_EXP==128,
-               "protocol v1 requires IEEE-754 binary32");
+               "protocol requires IEEE-754 binary32");
 
 uint32_t tdd_crc32_update(uint32_t crc, uint8_t byte)
 {
@@ -24,8 +24,23 @@ bool tdd_capture_init(struct tdd_capture *c, uint32_t fs, uint32_t period,
     c->config.fs_hz=fs ? fs : (TDD_CLOCK_HZ%period ? 0u : TDD_CLOCK_HZ/period);
     c->config.period_ticks=period;
     c->config.offset_code=offset; c->config.gain_a_per_code=gain;
+    c->config.kind=TDD_CAPTURE_CONTROL;
     c->next_id=1;
     return true;
+}
+bool tdd_capture_init_raw(struct tdd_capture *c, uint32_t period)
+{
+    /* Reuse ownership/ring checks; gain zero is an explicit RAW wire sentinel,
+       not a calibration. No current, PR or modulation values are recorded. */
+    if (!tdd_capture_init(c,0,period,0,1)) return false;
+    c->config.gain_a_per_code=0;
+    c->config.kind=TDD_CAPTURE_RAW;
+    return true;
+}
+bool tdd_capture_push_raw(struct tdd_capture *c, uint16_t raw, uint32_t seq, uint32_t ticks)
+{
+    if (!c || c->config.kind!=TDD_CAPTURE_RAW) return false;
+    return tdd_capture_push(c,raw,0,seq,ticks,0,0,0);
 }
 bool tdd_capture_request(struct tdd_capture *c)
 {
@@ -66,11 +81,16 @@ void tdd_capture_fault(struct tdd_capture *c, bool adc_error)
     tdd_capture_service(c);
 }
 bool tdd_capture_push(struct tdd_capture *c, uint16_t raw, float reference_a,
-                      uint32_t seq, uint32_t ticks)
+                      uint32_t seq, uint32_t ticks, float pr_volts,
+                      int16_t command_q15, int16_t latched_q15)
 {
     if (!c || c->stopped) return false;
+    if (c->config.kind==TDD_CAPTURE_RAW &&
+        (reference_a!=0 || pr_volts!=0 || command_q15!=0 || latched_q15!=0)) return false;
     struct tdd_bank *b=&c->bank[c->active];
-    if (raw>4095u || !isfinite(reference_a) || fabsf(reference_a)>32.767f) {
+    if (raw>4095u || !isfinite(reference_a) || fabsf(reference_a)>32.767f ||
+        !isfinite(pr_volts) || command_q15 < -31129 || command_q15 > 31129 ||
+        latched_q15 < -31129 || latched_q15 > 31129) {
         tdd_capture_fault(c,true); return false;
     }
     if (b->count && (seq != b->last_seq+1u || ticks-b->last_ticks != c->config.period_ticks)) {
@@ -78,6 +98,9 @@ bool tdd_capture_push(struct tdd_capture *c, uint16_t raw, float reference_a,
     }
     b->records[b->head].raw=raw;
     b->records[b->head].reference_ma=(int16_t)roundf(reference_a*1000.0f);
+    b->records[b->head].pr_volts=pr_volts;
+    b->records[b->head].command_q15=command_q15;
+    b->records[b->head].latched_q15=latched_q15;
     b->head=(b->head+1u)%TDD_CAPTURE_CAPACITY;
     if (b->count<TDD_CAPTURE_CAPACITY) ++b->count;
     b->last_seq=seq; b->last_ticks=ticks;
@@ -101,14 +124,14 @@ bool tdd_tx_begin(struct tdd_capture *c, struct tdd_transmitter *tx)
     tx->bank=ready-1u;
     const struct tdd_metadata *m=&c->bank[tx->bank].frozen;
     memset(tx->header,0,sizeof tx->header);
-    memcpy(tx->header,"TDD4",4); tx->header[4]=m->fs_hz ? 1u : 2u; tx->header[5]=1;
+    memcpy(tx->header,"TDD4",4); tx->header[4]=3u; tx->header[5]=(uint8_t)m->kind;
     put16(tx->header+6,48); put32(tx->header+8,m->capture_id);
-    put32(tx->header+12,m->count); put32(tx->header+16,m->fs_hz ? m->fs_hz : TDD_CLOCK_HZ);
+    put32(tx->header+12,m->count); put32(tx->header+16,TDD_CLOCK_HZ);
     put32(tx->header+20,m->first_seq); put32(tx->header+24,m->first_ticks);
     put_float(tx->header+28,m->offset_code); put_float(tx->header+32,m->gain_a_per_code);
-    put16(tx->header+36,4); put16(tx->header+38,m->flags);
-    put32(tx->header+40,m->period_ticks); put32(tx->header+44,4u*m->count);
-    tx->position=0; tx->total=48u+4u*m->count+4u;
+    put16(tx->header+36,12); put16(tx->header+38,m->flags);
+    put32(tx->header+40,m->period_ticks); put32(tx->header+44,12u*m->count);
+    tx->position=0; tx->total=48u+12u*m->count+4u;
     tx->crc=UINT32_MAX; tx->active=true;
     return true;
 }
@@ -123,11 +146,15 @@ size_t tdd_tx_read(struct tdd_capture *c, struct tdd_transmitter *tx,
         uint8_t byte;
         if (p<48u) byte=tx->header[p];
         else if (p<tx->total-4u) {
-            uint32_t record=(p-48u)/4u;
+            uint32_t record=(p-48u)/12u;
             uint32_t oldest=(b->head+TDD_CAPTURE_CAPACITY-b->count)%TDD_CAPTURE_CAPACITY;
             const struct tdd_record *r=&b->records[(oldest+record)%TDD_CAPTURE_CAPACITY];
-            uint32_t word=(uint32_t)r->raw|((uint32_t)(uint16_t)r->reference_ma<<16);
-            byte=(uint8_t)(word>>(8u*((p-48u)%4u)));
+            uint8_t encoded[12];
+            put16(encoded,r->raw); put16(encoded+2,(uint16_t)r->reference_ma);
+            put_float(encoded+4,r->pr_volts);
+            put16(encoded+8,(uint16_t)r->command_q15);
+            put16(encoded+10,(uint16_t)r->latched_q15);
+            byte=encoded[(p-48u)%12u];
         } else byte=(uint8_t)((tx->crc^UINT32_MAX)>>(8u*(p-(tx->total-4u))));
         if (p<tx->total-4u) tx->crc=tdd_crc32_update(tx->crc,byte);
         output[n++]=byte; ++tx->position;

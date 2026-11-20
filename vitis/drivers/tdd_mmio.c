@@ -72,3 +72,15 @@ bool tdd_pwm_ready(const struct tdd_bus *bus)
     uint32_t status=bus->read32(bus->context,0);
     return (status&(1u|16u|32u|64u|256u|512u|1024u))==(1u|16u|32u|256u|1024u);
 }
+
+/* VALID means at least one enabled valley latched the shadow reference. */
+bool tdd_pwm_read_latched(const struct tdd_bus *bus, int16_t *duty)
+{
+    if (!bus || !bus->read32 || !duty) return false;
+    uint32_t word=bus->read32(bus->context,0x10u);
+    int32_t value=(int32_t)(word&0xffffu);
+    if (value&0x8000) value-=65536;
+    if ((word&0xffff0000u)!=0x10000u || value < -31129 || value > 31129) return false;
+    *duty=(int16_t)value;
+    return true;
+}
