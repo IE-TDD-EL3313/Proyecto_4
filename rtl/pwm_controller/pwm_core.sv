@@ -53,6 +53,8 @@ module pwm_core #(
     output logic               sync_done_o,
     output logic               precharge_o,
     output logic               power_ready_o,
+    output logic signed [15:0] duty_latched_o,
+    output logic               duty_valid_o,
     output logic [13:0]        phase_limit_o
 );
 
@@ -73,6 +75,11 @@ module pwm_core #(
         endcase
     end
     assign phase_limit_o = n_sel;
+    assign duty_latched_o = duty_sh;
+    always_ff @(posedge clk) begin
+        if (!rst_n || !enable_i) duty_valid_o <= 1'b0;
+        else if (valley) duty_valid_o <= 1'b1;
+    end
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin

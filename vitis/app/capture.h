@@ -4,15 +4,24 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdatomic.h>
+#define TDD_CAPTURE_CONTROL 1u
+#define TDD_CAPTURE_RAW 2u
 #define TDD_CAPTURE_CAPACITY 2048u
 #define TDD_CAPTURE_SHORT 1u
 #define TDD_CAPTURE_FAULT 2u
 #define TDD_CAPTURE_ADC_ERROR 4u
-struct tdd_record { uint16_t raw; int16_t reference_ma; };
+/* Command computed for the next valley, and shadow reference at sample time.
+   Neither field is a measurement of bridge voltage after deadtime. */
+struct tdd_record {
+    uint16_t raw;
+    int16_t reference_ma;
+    float pr_volts;
+    int16_t command_q15, latched_q15;
+};
 struct tdd_metadata {
     uint32_t capture_id, count, fs_hz, first_seq, first_ticks, period_ticks;
     float offset_code, gain_a_per_code;
-    uint16_t flags;
+    uint16_t flags, kind;
 };
 struct tdd_bank {
     struct tdd_record records[TDD_CAPTURE_CAPACITY];
@@ -36,9 +45,12 @@ struct tdd_transmitter {
 };
 bool tdd_capture_init(struct tdd_capture *c, uint32_t fs, uint32_t period,
                       float offset, float gain);
+bool tdd_capture_init_raw(struct tdd_capture *c, uint32_t period);
+bool tdd_capture_push_raw(struct tdd_capture *c, uint16_t raw, uint32_t seq, uint32_t ticks);
 bool tdd_capture_request(struct tdd_capture *c); /* main only */
 bool tdd_capture_push(struct tdd_capture *c, uint16_t raw, float reference_a,
-                      uint32_t seq, uint32_t ticks); /* ISR only */
+                      uint32_t seq, uint32_t ticks, float pr_volts,
+                      int16_t command_q15, int16_t latched_q15); /* ISR only */
 void tdd_capture_fault(struct tdd_capture *c, bool adc_error); /* ISR only */
 void tdd_capture_service(struct tdd_capture *c); /* ISR, including FAULT */
 bool tdd_tx_begin(struct tdd_capture *c, struct tdd_transmitter *tx); /* main */

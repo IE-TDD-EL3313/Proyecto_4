@@ -77,6 +77,11 @@ foreach {cell offset} {control_adc 0x44A00000 control_pwm 0x44A10000} {
     if {[llength $segments]!=1} {error "Expected one AXI register segment on $cell"}
     assign_bd_address -offset $offset -range 64K -target_address_space [get_bd_addr_spaces microblaze_riscv_0/Data] $segments
 }
+# Both LMB ports share the same physical RAM. Capture banks alone use 48 KiB.
+foreach space {Data Instruction} controller {dlmb_bram_if_cntlr ilmb_bram_if_cntlr} {
+    set seg [get_bd_addr_segs microblaze_riscv_0/$space/SEG_${controller}_Mem]
+    set_property range 128K $seg
+}
 validate_bd_design -force
 save_bd_design
 set wrapper [make_wrapper -files $bd -top]
@@ -89,22 +94,45 @@ report_ip_status -file [file join $out ip_status.rpt]
 set stream [open [file join $out project_path.txt] w]
 puts $stream [file join $scratch p microblaze_v_system.xpr]
 close $stream
+# Export the real hardware handoff even without an implementation/bitstream.
+generate_target all $bd
+write_hw_platform -fixed -force -file [file join $scratch nexys4_control_hw.xsa]
+file copy -force [file join $scratch nexys4_control_hw.xsa] [file join $out nexys4_control_hw.xsa]
 if {$mode ne "validate"} {
-    launch_runs synth_1 -jobs 2
+    reset_run synth_1
+    launch_runs synth_1 -jobs 1
     wait_on_run synth_1
     if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {error "System synthesis failed"}
     open_run synth_1
+    foreach port [get_ports] {
+        if {[get_property PACKAGE_PIN $port] eq "" || [get_property IOSTANDARD $port] eq "DEFAULT"} {
+            error "Missing physical pin/IOSTANDARD constraint on $port"
+        }
+    }
     report_utilization -file [file join $out utilization_synth.rpt]
     report_timing_summary -file [file join $out timing_synth.rpt]
     close_design
 }
 if {$mode eq "bitstream"} {
-    launch_runs impl_1 -to_step write_bitstream -jobs 2
+    launch_runs impl_1 -to_step write_bitstream -jobs 1
     wait_on_run impl_1
     if {[get_property PROGRESS [get_runs impl_1]] ne "100%"} {error "Implementation failed"}
     open_run impl_1
     report_timing_summary -file [file join $out timing_impl.rpt]
-    write_hw_platform -fixed -include_bit -force -file [file join $out nexys4_control.xsa]
+    # Check actual routed setup/hold slack; successful bit generation alone
+    # does not demonstrate clock timing closure. External IO budgets remain a
+    # separate board-level requirement.
+    foreach delay {max min} {
+        set worst [get_timing_paths -delay_type $delay -max_paths 1]
+        if {![llength $worst] || [get_property SLACK $worst]<0} {
+            error "Routed $delay timing has no passing worst path; inspect timing_impl.rpt"
+        }
+    }
+    write_hw_platform -fixed -include_bit -force -file [file join $scratch nexys4_control.xsa]
+    file copy -force [file join $scratch nexys4_control.xsa] [file join $out nexys4_control.xsa]
+    set run_dir [get_property DIRECTORY [get_runs impl_1]]
+    file copy -force [file join $run_dir system_bd_wrapper.bit] [file join $out nexys4_control.bit]
+    file copy -force [file join $run_dir system_bd_wrapper.mmi] [file join $out nexys4_control.mmi]
 }
 puts "PASS: integrated Nexys4 mode=$mode; physical calibration and timing measurements remain required."
 close_project

@@ -18,7 +18,7 @@
 #define UART_BASE UINT32_C(0x40600000)
 #define GPIO_BASE UINT32_C(0x40000000)
 #define INTC_BASE UINT32_C(0x41200000)
-static struct tdd_runtime runtime; /* 16 KiB capture arrays: never put on stack */
+static struct tdd_runtime runtime; /* 48 KiB capture arrays: never put on stack */
 static struct tdd_transmitter transmitter;
 static XIntc intc;
 static bool diagnostic;
@@ -55,7 +55,10 @@ static void irq(void *ctx)
 {
     (void)ctx;
     if(diagnostic){marker(NULL,true);(void)tdd_timer_ack(&timer);marker(NULL,false);return;}
-    unsigned code=atomic_exchange_explicit(&amplitude_request,0,memory_order_acquire);
+    /* Single hart, non-nested ISR: main cannot publish between this load and
+       clear. Avoid an atomic RMW: the configured RV32IM CPU has no A extension. */
+    unsigned code=atomic_load_explicit(&amplitude_request,memory_order_acquire);
+    if(code) atomic_store_explicit(&amplitude_request,0,memory_order_relaxed);
     if(code){static const float levels[]={.2f,.5f,1.f};
         (void)tdd_control_set_amplitude(&runtime.control,levels[(code-1u)%3u]);}
     tdd_runtime_irq(&runtime);
