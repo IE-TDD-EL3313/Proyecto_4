@@ -376,6 +376,7 @@ El enunciado pide comprobar las compuertas y el tiempo muerto con la etapa de po
 
 ---
 
+
 ## Adquisición ADC/XADC, firmware de control y transmisión UART
 
 ### Objetivo y alcance del subsistema
