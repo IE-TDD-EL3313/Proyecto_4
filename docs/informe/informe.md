@@ -8,6 +8,54 @@ Las evidencias se identifican por su alcance: simulación, implementación y med
 
 ---
 
+## Resumen
+
+Se implementó en una Nexys 4 Rev. B una plataforma de control digital con MicroBlaze V a 100 MHz, PWM unipolar personalizado, adquisición XADC sincronizada, almacenamiento en BRAM y exportación por UART. En la PC se recibieron dos historiales de 2048 muestras RAW a 20 kHz, uno mediante envío automático y otro mediante el botón BTNC. Dos ejecuciones de la prueba AXI en placa verificaron los registros PWM, ambas saturaciones y la restauración de los valores iniciales tras un reset físico. Las formas de onda del PWM y la temporización del modelo XADC se evaluaron en simulación. Quedaron pendientes la validación analógica con entrada conocida y las mediciones del lazo integrado con Potencia.
+
+## Arquitectura e integración del sistema embebido
+
+El punto de partida fue conectar MicroBlaze V con el PWM y el XADC sin cargar al procesador con la generación de pulsos ni con la temporización del disparo. El sistema ejecuta una iteración de adquisición por período. El temporizador establece la base temporal, el PWM sitúa el disparo de adquisición dentro de la portadora y el XADC publica la muestra. El firmware lee la muestra, calcula el error de corriente y, en el modo de control, ejecuta el PR discreto y escribe la referencia PWM. La transmisión UART se atiende en el bucle principal. Así, la espera por espacio en la FIFO queda fuera de la rutina periódica de interrupción (ISR).
+
+La Nexys 4 integra el procesador MicroBlaze V a 100 MHz, memoria local accesible por ILMB y DLMB, interconexión AXI, temporizador, controlador de interrupciones, GPIO, UARTLite, PWM y XADC. El procesador configura los periféricos por registros mapeados en memoria. El hardware dedicado genera la portadora, el tiempo muerto y el disparo XADC con resolución de 10 ns a 100 MHz. La memoria local se amplió de 32 a 128 KiB para alojar el firmware y los dos bancos de captura.
+
+| Periférico | Base AXI | Función |
+|---|---|---|
+| GPIO | `0x40000000` | Botón de exportación y señales de diagnóstico |
+| UARTLite | `0x40600000` | Transferencia a la PC a 115200 baudios, 8N1 |
+| AXI INTC | `0x41200000` | Despacho de interrupciones |
+| AXI Timer | `0x41C00000` | Base temporal de control |
+| XADC | `0x44A00000` | Configuración, estado y muestra adquirida |
+| PWM | `0x44A10000` | Modulación, control, tiempo muerto y sincronización |
+
+La interfaz con Procesamiento Electrónico de Potencia comprende las cuatro señales digitales del puente H, la entrada de falla y la señal acondicionada de corriente en VAUX3. El PWM unipolar conmuta las dos piernas de forma complementaria con un intervalo de bloqueo por transición. La tensión diferencial del puente excita la carga RL y la corriente medida cierra el lazo PR. A la fecha de entrega, el equipo de Potencia se encontraba finalizando su etapa. Las pruebas en placa de este informe corresponden al subsistema digital, con el PR inactivo en las capturas RAW.
+
+```mermaid
+flowchart LR
+    CPU["MicroBlaze V"] -->|"Configura y escribe referencia"| PWM["PWM"]
+    TIMER["AXI Timer"] -->|"Interrupción periódica"| CPU
+    TIMER -->|"Sincroniza la portadora"| PWM
+    PWM -->|"Disparo de conversión"| ADC["XADC VAUX3"]
+    ADC -->|"Muestra y estado"| CPU
+    CPU -->|"Historial"| BRAM["BRAM local"]
+    BRAM -->|"Banco congelado"| UART["UARTLite"]
+    BTNC["BTNC"] -->|"Solicitud por GPIO"| CPU
+    UART -->|"Trama serie"| PC["PC"]
+```
+
+*Flujo funcional del diseño integrado. Las flechas muestran la dirección del evento o del dato. El procesador configura y accede a los periféricos mediante AXI.*
+
+[Documento de diseño](../diseno/planteamiento.md) · [Mapa de direcciones verificado](../../resultados/axi/verificacion_issue_13.md)
+
+### Reloj, reset y memoria
+
+La entrada de reloj de 100 MHz de la placa se asignó al pin E3 y el pulsador CPU RESET activo bajo al pin C12. El reset observado en placa devuelve los periféricos a un estado conocido antes de arrancar el firmware. AXI INTC recibe la interrupción del AXI Timer y la entrega al procesador. UARTLite se usa para exportar las muestras o el resultado de la prueba, mientras JTAG permite descargar el ELF y depurar el arranque.
+
+El mapa reserva `0x00000000–0x0001FFFF` para 128 KiB de memoria local compartida. ILMB y DLMB son dos rutas hacia la misma memoria. La BRAM AXI en `0x10000000–0x10007FFF` quedó accesible por instrucciones según el XSA auditado. Por eso el arreglo de muestras y el estado del firmware se enlazaron en la BRAM local.
+
+[Mapa de direcciones y rutas verificadas](../../resultados/axi/verificacion_issue_13.md) · [Constructor del sistema integrado](../../scripts/build_nexys4.tcl)
+
+Las secciones de PWM y firmware que siguen conservan el texto original del equipo. El apartado final de resultados incorpora las pruebas en placa realizadas después de redactar esas secciones y actualiza el estado experimental al cierre.
+
 ## Periférico PWM personalizado
 
 El PWM Controller es el periférico que diseñamos desde cero en SystemVerilog. Recibe del MicroBlaze V el índice de modulación que calcula el regulador PR, por medio de AXI4-Lite. Con eso genera las cuatro compuertas del puente H con modulación unipolar y tiempo muerto, y además el pulso que le indica al ADC cuándo muestrear. El diseño completo por niveles (diagramas de tercer y cuarto nivel) está en el [documento de diseño](../diseno/planteamiento.md#62-periférico-pwm-personalizado-pwm-controller). Aquí se resume lo necesario para entender los resultados.
@@ -311,7 +359,7 @@ El enunciado pide comprobar las compuertas y el tiempo muerto con la etapa de po
 - Pasó 85/85 pruebas en RTL y 25/25 en la netlist temporizada, sin un solo evento de shoot-through, con 2,2 ns de holgura a 100 MHz y menos del 1 % de la FPGA.
 
 **Limitaciones.**
-- Todavía no hay medición en la placa, así que no están caracterizados los retardos reales hasta los drivers.
+- Las pruebas en placa confirmaron el acceso AXI y el comportamiento de los registros PWM. Sin embargo, todavía no se han medido físicamente las formas de onda de las compuertas ni los retardos reales hasta los drivers.
 - El tiempo muerto es igual para las dos transiciones y las dos piernas. Si el IR2110 y los MOSFET apagan más lento de lo que encienden, podría convenir un valor distinto para cada flanco.
 - La distorsión que el tiempo muerto le mete a $v_{AB}$ depende del signo de la corriente, y el PWM no la compensa: queda en manos del PR.
 - La salida en 15 kHz no es exacta (0,01 %).
@@ -326,16 +374,8 @@ El enunciado pide comprobar las compuertas y el tiempo muerto con la etapa de po
 - Un testbench que solo mira puertos y mide en tiempo real, no en ciclos, es el que sirve para la simulación temporizada.
 - Varias decisiones que parecían de detalle salieron de hablar con el equipo de potencia: la precarga del bootstrap, liberar las compuertas en el pico, el valor del tiempo muerto. Sin eso el diseño habría pasado todas las simulaciones y aun así habría fallado en la placa. Así pasó con T13: con m = 0,95 los inferiores nunca alcanzaban a encender antes del primer pulso superior.
 
-### Referencias
-
-1. AMD, *AXI Reference Guide (UG1037)*. https://docs.amd.com/v/u/en-US/ug1037-vivado-axi-reference-guide
-2. AMD, *Vivado Design Suite User Guide: Creating and Packaging Custom IP (UG1118)*. https://docs.amd.com/r/en-US/ug1118-vivado-creating-packaging-custom-ip
-3. AMD, *Vivado Design Suite User Guide: Logic Simulation (UG900)*. https://docs.amd.com/r/en-US/ug900-vivado-logic-simulation
-4. AMD, *7 Series DSP48E1 Slice User Guide (UG479)*. https://docs.amd.com/v/u/en-US/ug479_7Series_DSP48E1
-5. Infineon, *IR2110(S)/IR2113(S) High and Low Side Driver*, hoja de datos.
-6. N. Mohan, T. Undeland y W. Robbins, *Power Electronics: Converters, Applications, and Design*, 3.ª ed., Wiley, 2003, cap. 8 (inversores monofásicos, PWM unipolar y tiempo muerto).
-
 ---
+
 
 ## Adquisición ADC/XADC, firmware de control y transmisión UART
 
@@ -345,7 +385,7 @@ Se desarrolló el subsistema digital encargado de adquirir datos del XADC, compr
 
 La implementación se integró con la arquitectura MicroBlaze V y el PWM del sistema mediante contratos de registros, sincronización, memoria y habilitación de compuertas. Se utilizó la Nexys 4 original, con FPGA `xc7a100tcsg324-1` y reloj de 100 MHz.
 
-Este apartado presenta el diseño realizado, las decisiones de implementación y los resultados obtenidos mediante pruebas de software, simulación e implementación en las herramientas AMD. La ejecución y las mediciones físicas se documentarán en el apartado experimental a cargo del responsable de la implementación en la placa; no se atribuyen resultados de hardware a las simulaciones aquí descritas.
+Este apartado presenta el diseño realizado, las decisiones de implementación y los resultados obtenidos mediante pruebas de software, simulación e implementación en las herramientas AMD. Las verificaciones físicas incorporadas posteriormente se presentan en el apartado «Resultados de integración y verificación en placa». Se distinguen explícitamente los resultados de simulación, implementación y ejecución real en la Nexys 4.
 
 ### Fundamentos y configuración del XADC
 
@@ -505,7 +545,7 @@ Los constructores generan el BSP y el linker desde el XSA integrado. `audit_adc_
 | Adquisición, cada uno de los tres ELF | 80784 bytes | 50288 bytes | 8192 / 4096 bytes |
 | Control en configuración diagnóstica | 89928 bytes | 41144 bytes | 8192 / 4096 bytes |
 
-El espacio restante y las reservas del linker no equivalen al consumo máximo dinámico medido de stack. Las cuatro aplicaciones se enlazaron con el BSP SDT real y pasaron la auditoría de memoria. Estos resultados todavía no confirman su ejecución en la FPGA.
+El espacio restante y las reservas del linker no equivalen al consumo máximo dinámico medido de stack. Las cuatro aplicaciones se enlazaron con el BSP SDT real y pasaron la auditoría de memoria. La compilación y la auditoría de memoria, por sí solas, no demuestran ejecución en FPGA. La ejecución física de las aplicaciones utilizadas en las pruebas AXI y de adquisición se documenta posteriormente; no se extiende esa validación a todas las aplicaciones compiladas.
 
 ### Método de verificación y resultados obtenidos
 
@@ -548,14 +588,14 @@ La entrega digital comprende las fuentes de adquisición y control en `rtl/` y `
 
 Las pruebas propias verificaron la coherencia de los registros, las conversiones del modelo XADC, la sincronización digital, los bancos de captura, el formato de transmisión y el enlace con memoria accesible. El uso de una aplicación RAW independiente permitió entregar una prueba ejecutable sin activar el regulador ni las compuertas del puente.
 
-El responsable de la implementación física ejecutará la prueba sobre la Nexys y añadirá al informe las mediciones correspondientes. La siguiente tabla identifica la evidencia que completará el análisis experimental; no modifica los resultados de simulación ya obtenidos.
+La sección posterior «Resultados de integración y verificación en placa» documenta las pruebas AXI y las capturas RAW realizadas en la Nexys 4. La siguiente tabla distingue las verificaciones físicas ya incorporadas de las mediciones que permanecen pendientes. Los resultados de simulación conservan su alcance original.
 
 | Comprobación física | Evidencia por incorporar |
 |---|---|
-| Lectura de conversiones desde MicroBlaze V | Estado del firmware y capturas RAW completas de 2048 muestras en las tres frecuencias |
+| Lectura de conversiones desde MicroBlaze V | Verificada en placa a 20 kHz con dos capturas RAW completas de 2048 muestras; faltan las pruebas físicas a 10 y 15 kHz |
 | Respuesta a una entrada analógica conocida | Voltaje medido, condiciones de conexión y códigos mínimo, máximo y promedio |
 | Adquisición durante exportación | Capturas antes y después del envío, estado final y continuidad de secuencia/tiempo |
-| UART real | Bytes recibidos, CSV, metadatos e informe de recepción |
+| UART real | Verificada mediante dos transferencias completas a la PC, una automática y otra solicitada con BTNC; el estado de los indicadores de la segunda trama requiere confirmación adicional |
 | Temporización | Período y jitter de GPIO_ISR, fase PWM→CONVST/EOC y duración del servicio con el despacho completo |
 
 Las mediciones deberán identificar la placa, el BIT/XSA/ELF utilizado, la señal aplicada y los instrumentos. Hasta su incorporación, la evidencia presentada acredita el desarrollo digital y los ensayos descritos, sin afirmar funcionamiento experimental del lazo energizado.
@@ -566,14 +606,116 @@ La implementación permite controlar cuándo se solicita una conversión, asocia
 
 La revisión de memoria mostró que un ELF enlazado no basta para demostrar integración: el procesador debe disponer de una ruta de datos hacia la región donde se ubican sus variables. La ampliación de LMB y la auditoría contra el XSA resuelven ese requisito en la versión entregada, aunque todavía corresponde comprobar el arranque real.
 
-Las limitaciones actuales son la ausencia de ejecución y mediciones físicas, la calibración y polaridad del sensor pendientes y el tamaño reducido del ensayo analógico simulado. La aplicación RAW permite avanzar sin inventar esos parámetros, pero no acredita el seguimiento de corriente, la respuesta del PR ni el funcionamiento energizado del inversor. Para evaluar el control completo también se requieren coeficientes aprobados, límites de modulación, protecciones y mediciones temporales reales.
+Las pruebas posteriores en la Nexys 4 confirmaron la ejecución de aplicaciones de diagnóstico, la adquisición de historiales RAW y su exportación por UART. Permanecen pendientes la calibración y polaridad del sensor, la caracterización analógica con una entrada conocida y las mediciones temporales del lazo completo. El ensayo analógico simulado también tuvo un tamaño reducido. La aplicación RAW permite avanzar sin inventar esos parámetros, pero no acredita el seguimiento de corriente, la respuesta del PR ni el funcionamiento energizado del inversor. Para evaluar el control completo también se requieren coeficientes aprobados, límites de modulación, protecciones y mediciones temporales reales.
 
 El trabajo digital entregó una cadena implementada desde el disparo de conversión hasta el almacenamiento y la recepción en PC, junto con el núcleo de procesamiento y su supervisor periódico. Se resolvieron las dependencias de sincronización, propiedad de memoria y ubicación del histórico, y se generaron productos de hardware y software compatibles para continuar la integración en placa.
 
 Los resultados obtenidos permiten evaluar por separado los mecanismos de adquisición, control y comunicación, y delimitan lo que debe contrastarse mediante mediciones físicas. La contribución experimental del sistema completará ese contraste y el análisis conjunto del inversor.
 
-### Referencias de adquisición y temporización
+## Resultados de integración y verificación en placa
 
+### Verificación AXI en la Nexys 4
+
+El firmware de prueba ejecutó transacciones AXI desde el MicroBlaze V con la portadora y el permiso de compuertas deshabilitados. Leyó los valores iniciales antes de escribir, verificó los campos reservados y de solo lectura, aplicó referencias con ambos signos y escribió valores diferentes en el tiempo muerto y la fase de sincronización. Después de la primera corrida se pulsó el botón físico CPU RESET. El programa volvió a ejecutarse desde BRAM sin recargar el ELF ni el bitstream.
+
+| Comprobación | Observación |
+|---|---|
+| Restauración tras reset | `CTRL_STATUS` y `DUTY_REF` en cero, `DEADTIME=100`, `SYNC_PHASE=1000` y `DUTY_LATCHED=0` al inicio de ambas corridas |
+| Escritura y lectura de referencias | `0x1234` para +4660 y `0xEDCC` para −4660 |
+| Saturación positiva y negativa | `0x7FFF → 0x7999` y `0x8000 → 0x8667` |
+| Campos protegidos | La escritura no alteró campos de solo lectura ni reservados |
+| Sombra con PWM detenido | `DUTY_LATCHED=0x00008667`, con `VALID=0` |
+| Resultado | Dos `PASS AXI_PWM #13` por UART |
+
+[Procedimiento, mapa y hashes](../../resultados/axi/verificacion_issue_13.md) · [Transcripción UART](../../resultados/axi/uart_pwm_axi_test_final.log) · [Firmware de prueba](../../vitis/bsp/pwm_axi_test_main.c) · [PR #35](https://github.com/IE-TDD-EL3313/Proyecto_4/pull/35)
+
+### Diagnóstico de saturación y análisis crítico del PWM
+
+La verificación inicial de placa mostró que la orden positiva `0x7FFF` quedaba limitada a `0x3239`. El wrapper del Block Design estaba pasando `DUTY_MAX` como la cadena `"31129"`. Al truncarla a 16 bits, los caracteres finales `2` y `9` daban exactamente los bytes `0x32` y `0x39`. El banco de registros terminó usando 12 857 como límite. Las pruebas aisladas instanciaban el valor numérico, lo que explica por qué la discrepancia apareció al ejecutar el diseño integrado.
+
+Se declaró el parámetro como `int` en la interfaz del PWM y se hizo explícita la conversión a 16 bits al conectarlo al banco de registros. El wrapper corregido generó `.DUTY_MAX(31129)`. En Q1.15, el límite observado pasó de aproximadamente 0,3924 a 0,9500. Se reportaron 85/85 comprobaciones RTL y 86/86 con el wrapper corregido, además de las dos corridas UART que confirmaron el comportamiento en placa. Las 25 pruebas temporizadas del PWM aislado corresponden a la campaña previa identificada arriba.
+
+El ensayo de placa verifica las transacciones AXI y el estado de los registros. Quedan pendientes las mediciones de frecuencia y tiempo muerto en las salidas PWM y la correlación temporal entre el disparo PWM y la publicación XADC en la FPGA. Se preparó una instrumentación ILA, pero la corrida de Vivado terminó en `create_debug_core` con el error `[Vivado 12-29205]`, antes de generar un bitstream instrumentado. Un monitor digital con contadores y salida UART queda como alternativa para esa verificación.
+
+### Adquisición y transmisión verificadas en la Nexys 4
+
+Se usó la plataforma integrada de 128 KiB en la Nexys 4, con reloj de 100 MHz, VAUX3 desconectado y las compuertas bloqueadas. La prueba automática utilizó `adc_verify_20khz.elf`. La segunda utilizó `control_inversor_app.elf` con `TDD_DIAGNOSTIC_HISTORY=1`, que habilita la exportación del historial RAW al pulsar BTNC mientras el PR permanece inactivo. La PC recibió los datos mediante UARTLite y guardó un CSV por ensayo.
+
+| Magnitud | Envío automático | Envío por BTNC |
+|---|---:|---:|
+| Muestras RAW recibidas | 2048 | 2048 |
+| Números de secuencia | 2–2049 | 29 223–31 270 |
+| Saltos de secuencia | 0 | 0 |
+| Intervalo registrado | 50 µs | 50 µs |
+| Tiempo entre primera y última muestra | 102,35 ms | 102,35 ms |
+| Mínimo / máximo, códigos RAW | 57 / 495 | 449 / 502 |
+| Promedio, códigos RAW | 438,36 | 474,45 |
+| Indicadores de trama | CRC válido y `flags=0` | `flags` sin confirmar mediante la salida UART y el CSV disponibles |
+
+El período configurado de 5000 ciclos a 100 MHz da 50 µs por muestra y una frecuencia de muestreo de 20 kHz. La separación entre los extremos de cada captura es de 2047 intervalos. El CSV conserva una secuencia consecutiva y una base temporal uniforme. Estos datos describen el historial recibido y su período reportado. El jitter de la ISR y el cumplimiento del plazo del lazo con el PR activo requieren instrumentación temporal adicional.
+
+![Códigos RAW de las capturas automática y por BTNC](evidencias/capturas_xadc.svg)
+
+*Figura 9. Capturas XADC en placa a 20 kHz con VAUX3 desconectado. Ambas curvas utilizan la misma escala temporal y vertical.*
+
+La primera toma incluye un transitorio de arranque. Después se observa una componente recurrente cercana a 60 Hz, compatible con captación de ruido por una entrada flotante. El montaje utilizado deja indeterminado el origen de esa componente y la relación entre los códigos y una corriente física. La segunda toma demuestra el recorrido desde el evento de BTNC hasta la recepción del banco completo en la PC.
+
+[CSV automático](evidencias/xadc_raw_automatico.csv) · [CSV de BTNC](evidencias/xadc_raw_btnc.csv) · [Registro de verificación del XADC](https://github.com/IE-TDD-EL3313/Proyecto_4/issues/6#issuecomment-7055549949)
+
+### Memoria y temporización del sistema integrado
+
+Dos bancos de 2048 registros de 12 bytes requieren 49 152 bytes. Esa reserva supera los 32 KiB del proyecto base antes de incluir código, pila y heap. En el XSA integrado se habilitaron 128 KiB de BRAM local compartida y se verificó con el mapa del enlazador y la auditoría XSA/ELF que la memoria estuviera accesible por las rutas correctas. La BRAM AXI adicional tiene ruta de instrucciones en este diseño.
+
+| Aplicación | Huella de BRAM local | Margen libre |
+|---|---:|---:|
+| Verificación ADC RAW a 20 kHz | 80 256 B | 50 816 B |
+| Historial RAW solicitado mediante BTNC | 88 112 B | 42 960 B |
+| Prueba AXI del PWM | 20 952 B | 110 120 B |
+
+En el sistema integrado previo a la corrección de `DUTY_MAX` se reportaron WNS = +0,465 ns y WHS = +0,041 ns. En la corrida del bitstream corregido se reportaron **WNS = +1,065 ns, WHS = +0,041 ns y cero endpoints con violaciones**, a 100 MHz para las restricciones definidas. Las cifras de utilización integrada citadas en la sección previa corresponden a la reconstrucción original. El cierre de temporización estática evalúa las rutas cubiertas por las restricciones de Vivado. El tiempo real de ejecución del control se mide ejecutando el firmware en el procesador.
+
+### Matriz de cumplimiento y trazabilidad de requisitos
+
+La siguiente matriz relaciona los requisitos principales del Proyecto 4 de EL3313 con las verificaciones documentadas. Se distingue entre resultados obtenidos mediante simulación, pruebas ejecutadas físicamente en la Nexys 4 y actividades que todavía requieren validación experimental.
+
+| Requisito | Evidencia documentada | Estado |
+|---|---|---|
+| Sistema embebido MicroBlaze V | Arquitectura a 100 MHz, BRAM, interfaces AXI y aplicaciones ejecutadas en FPGA | Verificado parcialmente en placa |
+| Periférico PWM personalizado AXI4-Lite | Testbench de autochequeo, simulación temporizada y pruebas de registros AXI | Verificado en simulación y parcialmente en placa |
+| PWM unipolar y tiempo muerto | Formas de onda y comprobaciones del periférico mediante simulación | Verificado en simulación; pendiente medición física |
+| Saturación de referencia PWM | Pruebas AXI de saturación positiva y negativa en la Nexys 4 | Verificado en placa |
+| Sincronización PWM–XADC | Pruebas digitales y simulaciones del subsistema | Verificado en simulación; pendiente correlación temporal física |
+| Adquisición mediante XADC | Dos capturas RAW completas de 2048 muestras a 20 kHz | Verificado digitalmente en placa; pendiente calibración analógica |
+| Almacenamiento de muestras | Historiales completos recuperados desde el sistema embebido | Verificado en placa |
+| Exportación mediante UART | Transferencias automáticas y mediante BTNC recibidas en la PC | Verificado en placa |
+| Firmware de control | Implementación y pruebas de software; aplicaciones de diagnóstico ejecutadas en FPGA | Verificado parcialmente; PR integrado pendiente |
+| Temporización del sistema | Análisis de timing de implementación e instrumentación parcial del firmware | Verificado parcialmente; pendiente medición completa de jitter y WCET |
+| Integración con inversor monofásico | Interfaces digitales y preparación para conexión con la etapa de potencia | Pendiente validación conjunta |
+| Seguimiento de corriente mediante PR | Arquitectura de control preparada para integrar los parámetros definitivos | Pendiente validación experimental |
+
+Los estados anteriores se refieren exclusivamente a las evidencias documentadas. La ejecución de aplicaciones de diagnóstico no equivale a demostrar el funcionamiento del controlador PR en lazo cerrado. Asimismo, la recepción de muestras RAW con VAUX3 desconectado verifica la cadena digital de adquisición y exportación, pero no constituye una medición calibrada de corriente.
+
+---
+
+### Conclusiones y trabajo pendiente
+
+1. La plataforma digital se implementó para 100 MHz y se validó el acceso integrado a los registros PWM desde MicroBlaze V. La comparación entre simulación y banco permitió rastrear una diferencia de saturación hasta el tipo del parámetro en el wrapper. La corrección quedó confirmada mediante dos ejecuciones exitosas de la prueba AXI en placa, con un reset físico entre ambas.
+2. Se verificaron en placa la adquisición RAW a 20 kHz, el almacenamiento de 2048 muestras consecutivas y su recepción por UART, tanto en el envío automático como mediante BTNC. La ampliación de BRAM conserva el historial completo y la separación entre ISR y transmisión evita esperar por la UART dentro del servicio periódico.
+3. La verificación temporizada de la netlist del PWM respalda la generación de las formas de onda previstas. Falta medir en placa el tiempo muerto, la frecuencia y la relación temporal entre el disparo y la publicación del XADC. También queda pendiente aplicar una entrada conocida a VAUX3 para comprobar su respuesta analógica.
+4. El equipo de Potencia se encontraba finalizando su etapa al cierre de este informe. Quedan pendientes la incorporación de los coeficientes aprobados, la validación experimental del seguimiento de corriente con el PR activo y la medición del tiempo de ejecución y del jitter del lazo durante la exportación.
+5. El proceso de integración evidenció la importancia de combinar verificaciones funcionales, simulaciones temporizadas y pruebas físicas. Aunque los testbenches permitieron comprobar el comportamiento del PWM y los módulos de adquisición, las pruebas AXI en la Nexys 4 revelaron una discrepancia en la saturación que fue necesario rastrear hasta la parametrización del wrapper. Esta experiencia confirmó que la verificación aislada de un periférico no sustituye su validación dentro del sistema embebido completo y que las evidencias deben distinguir claramente entre simulación, implementación y ejecución real.
+
+---
+
+## Referencias bibliográficas
+
+- AMD, *AXI Reference Guide (UG1037)*. https://docs.amd.com/v/u/en-US/ug1037-vivado-axi-reference-guide
+- AMD, *Vivado Design Suite User Guide: Creating and Packaging Custom IP (UG1118)*. https://docs.amd.com/r/en-US/ug1118-vivado-creating-packaging-custom-ip
+- AMD, *Vivado Design Suite User Guide: Logic Simulation (UG900)*. https://docs.amd.com/r/en-US/ug900-vivado-logic-simulation
+- AMD, *7 Series DSP48E1 Slice User Guide (UG479)*. https://docs.amd.com/v/u/en-US/ug479_7Series_DSP48E1
+- Infineon, *IR2110(S)/IR2113(S) High and Low Side Driver*, hoja de datos.
+- N. Mohan, T. Undeland y W. Robbins, *Power Electronics: Converters, Applications, and Design*, 3.ª ed., Wiley, 2003, cap. 8 (inversores monofásicos, PWM unipolar y tiempo muerto).
 - AMD, [*7 Series FPGAs and Zynq-7000 SoC XADC User Guide*, UG480](https://docs.amd.com/r/en-US/ug480_7Series_XADC): función de transferencia, entrada unipolar, muestreo por evento y DRP.
 - AMD, [*AXI Timer LogiCORE IP Product Guide*, PG079](https://docs.amd.com/r/en-US/pg079-axi-timer): modo Generate, recarga e interrupciones.
-- Implementación y configuración del proyecto: fuentes RTL/C/Python y `board_config.h` indicados en esta sección; resultados propios de simulación y compilación identificados por fecha y alcance.
+
+**Documentación propia del proyecto.** Los archivos RTL, C, Python y las evidencias experimentales se identifican mediante sus rutas en las secciones correspondientes.
