@@ -273,6 +273,8 @@ El PWM Controller es el periférico que nos toca diseñar desde cero, ya que Viv
 
 Todo el periférico trabaja con el reloj de 100 MHz del sistema (`s_axi_aclk`) y el reset activo en bajo (`s_axi_aresetn`), así que no hay cruces entre dominios de reloj.
 
+Para cumplir el contrato C4 (sección 10), acordado con firmware, el PWM separa el funcionamiento de la portadora del de las compuertas: con `enable` corren la portadora y el trigger del ADC, y con `gates_en` se permite que las compuertas conmuten. Además recibe `sync_start_i` desde el AXI Timer para arrancar en fase con la interrupción de control.
+
 #### Señales de entrada
 
 | Señal | Ancho | Dirección | Descripción |
@@ -281,6 +283,8 @@ Todo el periférico trabaja con el reloj de 100 MHz del sistema (`s_axi_aclk`) y
 | `s_axi_aresetn` | 1 bit | Entrada | Reset activo en bajo. |
 | Canales AW, W y AR | — | Entrada | Dirección y datos de escritura y lectura del bus AXI4-Lite. |
 | `s_axi_bready`, `s_axi_rready` | 1 bit | Entrada | El MicroBlaze V acepta la respuesta de escritura o el dato leído. |
+| `sync_start_i` | 1 bit | Entrada | Pulso `generateout0` del AXI Timer. Con `sync_arm` activo, su primer flanco carga la portadora en `SYNC_PHASE` (contrato C4). |
+| `fault_i` | 1 bit | Entrada | Falla externa de la etapa de potencia, activa en alto. Se conecta a 0 si no se usa. |
 
 #### Señales de salida
 
@@ -289,19 +293,23 @@ Todo el periférico trabaja con el reloj de 100 MHz del sistema (`s_axi_aclk`) y
 | Canales B y R, `awready`, `wready`, `arready` | — | Salida | Respuestas del esclavo AXI4-Lite. |
 | `gate_ah_o`, `gate_al_o` | 1 bit | Salida | Compuertas alta y baja de la pierna A. |
 | `gate_bh_o`, `gate_bl_o` | 1 bit | Salida | Compuertas alta y baja de la pierna B. |
-| `pwm_trigger_o` | 1 bit | Salida | Pulso de sincronización hacia el ADC. |
+| `pwm_trigger_o` | 1 bit | Salida | Pulso en cada valle de la portadora (diagnóstico). |
+| `adc_trigger_o` | 1 bit | Salida | Igual a `pwm_trigger_o`, pero solo después de sincronizar con el Timer (`sync_done` = 1). Es el que se conecta a la interfaz ADC. |
 
 #### Señales internas relevantes
 
 | Señal | Ancho | Descripción |
 |---|---:|---|
 | `enable`, `freq_sel` | 1 / 2 bits | Configuración escrita por software. |
+| `gates_en` | 1 bit | Permiso de software para que las compuertas conmuten. |
+| `sync_phase` | 14 bits | Posición de la portadora al recibir `sync_start_i`. |
 | `duty_ref` | 16 bits | Referencia de modulación, ya saturada. |
 | `dead_time` | 10 bits | Tiempo muerto en ciclos de reloj, ya saturado. |
 | `c` | 14 bits | Valor de la portadora triangular. |
 | `valley` | 1 bit | Indica que la portadora está en cero (inicio del período). |
 | `s_a`, `s_b` | 1 bit | Señal de conmutación de cada pierna, antes del tiempo muerto. |
 | `running` | 1 bit | Indica que el generador está activo. |
+| `gates_on` | 1 bit | Indica que las compuertas están conmutando. |
 
 ![Diagrama de tercer nivel — PWM Controller](figuras/tercer_nivel_pwm.png)
 
@@ -310,6 +318,8 @@ Todo el periférico trabaja con el reloj de 100 MHz del sistema (`s_axi_aclk`) y
 El software escribe la configuración en los registros AXI4-Lite. Esos valores no pasan directo a la modulación: primero se copian a unos registros sombra, y esa copia solo se hace cuando la portadora llega a cero (el valle). Con esto evitamos que un cambio de ciclo de trabajo o de frecuencia a mitad del período deje un pulso cortado en las compuertas.
 
 El generador de portadora es un contador que sube y baja, formando un triángulo. El comparador usa esa portadora y `duty_ref` para decidir cuándo conduce el transistor superior de cada pierna (`s_a` y `s_b`). Después, cada pierna pasa por un generador de tiempo muerto que produce el par de compuertas complementarias. Por último, en cada valle de la portadora se genera el pulso `pwm_trigger_o` para el ADC.
+
+Las compuertas solo conmutan si `enable` y `gates_en` están en 1 y no hay falla. El permiso se aplica en el siguiente pico de la portadora y se retira de inmediato. Al liberarse, los dos MOSFET inferiores se mantienen encendidos durante 20 µs (precarga) antes de empezar a conmutar, para que se carguen los capacitores bootstrap de los IR2110 (ver 7.4). Así, en la etapa WARMUP del firmware la portadora y el trigger funcionan y el ADC toma muestras, pero el puente H no recibe pulsos. La entrada `sync_start_i` solo se acepta mientras las compuertas están bloqueadas, para que el salto de fase nunca produzca un pulso cortado.
 
 Los subbloques se detallan en las secciones 7.1 a 7.5.
 
@@ -484,9 +494,9 @@ Permitir que el MicroBlaze V configure el PWM y lea su estado por medio del bus 
 | Señal | Dirección | Descripción |
 |---|---|---|
 | Canales AW, W, AR, `bready`, `rready` | Entrada | Transacciones de escritura y lectura del MicroBlaze V. |
-| `running` | Entrada | Estado del generador, para el bit de solo lectura. |
+| `running`, `gates_on`, `fault` | Entrada | Estado del núcleo, para los bits de solo lectura. |
 | Canales B, R, `awready`, `wready`, `arready` | Salida | Respuestas AXI4-Lite. |
-| `enable`, `freq_sel`, `duty_ref`, `dead_time` | Salida | Configuración hacia los registros sombra. |
+| `enable`, `gates_en`, `freq_sel`, `duty_ref`, `dead_time`, `sync_phase` | Salida | Configuración hacia el núcleo del PWM. |
 
 ```mermaid
 stateDiagram-v2
@@ -512,7 +522,7 @@ stateDiagram-v2
 | `W_IDLE` | 1 | 1 | 0 |
 | `W_HAVE_AW` | 0 | 1 | 0 |
 | `W_HAVE_W` | 1 | 0 | 0 |
-| `W_RESP` | 0 | 0 | 1 (con `BRESP = OKAY`) |
+| `W_RESP` | 0 | 0 | 1 (`BRESP = OKAY`, o `SLVERR` si se rechaza SYNC_PHASE) |
 
 | Estado | `ARREADY` | `RVALID` |
 |---|:---:|:---:|
@@ -523,7 +533,7 @@ stateDiagram-v2
 
 La escritura y la lectura se manejan con dos máquinas de estados separadas. En la escritura, la dirección (AW) y el dato (W) pueden llegar en cualquier orden, así que la máquina guarda el que llegue primero y espera al otro. Cuando tiene los dos, escribe el registro y responde con `BVALID`. En la lectura, al recibir la dirección se carga el dato en `RDATA` y se activa `RVALID` hasta que el procesador lo recibe.
 
-El registro se selecciona con los bits `[3:2]` de la dirección: 0 es CTRL_STATUS, 1 es DUTY_REF y 2 es DEADTIME (el mapa completo está en la sección 8.2).
+El registro se selecciona con los bits `[3:2]` de la dirección: 0 es CTRL_STATUS, 1 es DUTY_REF, 2 es DEADTIME y 3 es SYNC_PHASE (el mapa completo está en la sección 8.2).
 
 Al escribir `duty_ref` o `dead_time`, el valor se satura antes de guardarse:
 
@@ -539,17 +549,19 @@ La saturación se hace al momento de escribir, y lo que se lee de vuelta es el v
 
 El enunciado pide tiempo muerto configurable, pero los registros 0x00 y 0x04 no tienen un campo para eso. Por eso agregamos el registro DEADTIME en 0x08, sin cambiar los otros dos.
 
+Para el contrato C4 se agregaron el bit `gates_en` en CTRL_STATUS y el registro SYNC_PHASE en 0x0C. La fase quedó en un registro, con valor de reset 1000, para que funcione sin configurarla y a la vez se pueda ajustar si la medición en la placa muestra una latencia que haya que compensar. Los bits nuevos usan campos que antes estaban reservados, así que los registros del enunciado no cambian.
+
 #### Comportamiento durante el reset
 
-Todos los registros vuelven a 0, excepto DEADTIME, que arranca en 100 ciclos (1 µs). Las salidas `VALID` del bus quedan en 0.
+Todos los registros vuelven a 0, excepto DEADTIME, que arranca en 100 ciclos (1 µs), y SYNC_PHASE, que arranca en 1000. Las salidas `VALID` del bus quedan en 0.
 
 #### Casos especiales y condiciones de borde
 
-Si se escribe en una dirección que no existe, se responde normalmente (`OKAY`), no se guarda nada y la lectura devuelve 0. Escribir en el bit `running` no tiene efecto porque es de solo lectura.
+Escribir en los bits de solo lectura (`running`, `gates_on`, `fault`, `sync_done`, `precharge`, `power_ready`) no tiene efecto, y los bits reservados se leen como 0. Una escritura a SYNC_PHASE con el PWM habilitado, con las compuertas activas o con un valor mayor o igual que N se rechaza: el registro no cambia y la respuesta es `SLVERR`. Si hay una falla, el hardware borra `gates_en`. Aunque la falla desaparezca, las compuertas no vuelven a conmutar hasta que el software escriba `gates_en` = 1 otra vez. Si la falla y una escritura de `gates_en` = 1 llegan en el mismo ciclo, gana la falla.
 
 #### Estrategia de validación
 
-En el testbench se escriben y leen todos los registros, incluyendo valores fuera de rango y los dos órdenes posibles de AW y W.
+En el testbench se escriben y leen todos los registros, incluyendo valores fuera de rango, escrituras parciales con `WSTRB`, los dos órdenes posibles de AW y W, y `BREADY`/`RREADY` retrasados.
 
 ---
 
@@ -565,8 +577,10 @@ Generar la portadora triangular que usan las dos piernas, con la frecuencia que 
 |---|---|---|
 | `enable` | Entrada | Habilita el generador. |
 | `N` | Entrada | Valor máximo de la portadora, según `freq_sel`. |
+| `sync_load`, `sync_phase` | Entrada | Carga de fase: primer flanco de `sync_start_i` después de armar `sync_arm`, con las compuertas bloqueadas. |
 | `c` | Salida | Valor actual de la portadora (14 bits). |
 | `valley` | Salida | Pulso cuando `c = 0`. |
+| `peak` | Salida | Pulso cuando `c = N`. |
 | `running` | Salida | 1 mientras el generador está activo. |
 
 ![Diagrama de cuarto nivel — Generador de portadora](figuras/cuarto_nivel_portadora.png)
@@ -581,18 +595,26 @@ $$
 
 | `freq_sel` | N | $f_{sw}$ |
 |---|---:|---:|
-| `00` | 10000 | 5 kHz |
-| `01` | 5000 | 10 kHz |
+| `00` | 5000 | 10 kHz |
+| `01` | 3333 | 15 kHz (15,0015 kHz) |
 | `10` | 2500 | 20 kHz |
-| `11` | 1250 | 40 kHz |
+| `11` | 2500 | 20 kHz (repetido) |
+
+Estas son las tres frecuencias que PEDP está evaluando en PLECS. Para 15 kHz el valor exacto sería N = 3333,3. Con N = 3333 el período es de 6666 ciclos (66,66 µs), un error de 0,01 %. El AXI Timer debe usar ese mismo período de 6666 ciclos para que la sincronización no derive. El código `11` repite 20 kHz para que no exista una frecuencia que no se haya evaluado con la etapa de potencia.
 
 Como la modulación es unipolar, cada transistor conmuta a $f_{sw}$, pero la tensión en la carga tiene su componente principal en $2 f_{sw}$.
 
 Cuando `enable` pasa a 1, el contador arranca desde 0 y `running` se pone en 1. Cuando `enable` pasa a 0, el contador se detiene, `running` vuelve a 0 y las compuertas se apagan de inmediato.
 
+La sincronización con el Timer se hace una sola vez. El firmware arma la carga escribiendo `sync_arm` = 1 junto con `enable` = 1 y `gates_en` = 0. Con el primer flanco de `sync_start_i`, el contador salta a `sync_phase` y sigue subiendo desde ahí, `sync_done` pasa a 1 y `sync_arm` se borra solo. Los pulsos siguientes de `generateout0` se ignoran. Como el Timer y el PWM usan el mismo reloj y el mismo período, quedan alineados sin necesidad de recargar. Con el valor de reset (1000) y a 20 kHz, la interrupción del Timer queda 10 µs después del valle, como pide la sección 9.2.3. `sync_done` vuelve a 0 cuando se deshabilita el PWM, y para sincronizar otra vez hay que volver a armar.
+
+Mientras `sync_done` = 0, el trigger hacia el ADC (`adc_trigger_o`) está bloqueado, para que el firmware no reciba muestras tomadas antes de quedar en fase. La salida `pwm_trigger_o` sigue disponible como señal de diagnóstico.
+
 #### Diseño y justificación técnica
 
-Usamos una portadora triangular y no diente de sierra porque los pulsos quedan centrados en el período y el valle sirve como instante de muestreo (ver 7.5). Elegimos valores de N que dan frecuencias exactas con el reloj de 100 MHz, y usamos los cuatro códigos de `freq_sel` para que no haya ninguno inválido. Las frecuencias son una propuesta inicial: si el equipo de potencia escoge otra, solo se cambia la tabla de N.
+Usamos una portadora triangular y no diente de sierra porque los pulsos quedan centrados en el período y el valle sirve como instante de muestreo (ver 7.5). Los valores de N corresponden a las frecuencias que definió PEDP, y usamos los cuatro códigos de `freq_sel` para que no haya ninguno inválido. Si PEDP cambia alguna frecuencia, solo se cambia la tabla de N (parámetros `N_00` a `N_11` del IP).
+
+El generador también entrega una señal `peak` cuando la portadora llega a N. Se usa para liberar las compuertas, porque en el pico las dos piernas tienen encendido el MOSFET inferior.
 
 Al deshabilitar, las compuertas se apagan sin esperar a que termine el período, porque en el puente H es más seguro apagar todo de una vez.
 
@@ -604,9 +626,11 @@ El contador queda en 0, `running` en 0 y no hay pulsos de `valley`.
 
 Si se cambia `freq_sel` con el PWM funcionando, el nuevo valor de N se aplica en el siguiente valle, nunca a mitad de un período.
 
+`sync_phase` debe ser menor que N; los valores mayores se rechazan al escribirlos (ver 7.1). Con `gates_en` = 1 o con las compuertas activas, `sync_start_i` se ignora y `sync_arm` no se puede armar.
+
 #### Estrategia de validación
 
-Para cada `freq_sel` se mide en simulación el número de ciclos entre dos valles, que debe ser 2N. También se prueba cambiar la frecuencia con el generador activo.
+Para cada `freq_sel` se mide en simulación el número de ciclos entre dos valles, que debe ser 2N. También se prueba cambiar la frecuencia con el generador activo, la carga de fase con `sync_start_i` y que los pulsos periódicos no produzcan saltos.
 
 ---
 
@@ -695,24 +719,25 @@ Producir las dos compuertas complementarias de cada pierna, asegurando que nunca
 |---|---|---|
 | `s` | Entrada | `s_a` o `s_b`, desde el comparador. |
 | `dead_time` | Entrada | Tiempo muerto en ciclos de reloj. |
-| `running` | Entrada | Si es 0, las compuertas se apagan. |
+| `allow` | Entrada | Permiso para conmutar: `gates_on` = 1, con `enable` y `gates_en` en 1 y sin falla. Si es 0, las compuertas se apagan. |
+| `precharge` | Entrada | Durante la precarga fuerza el MOSFET inferior encendido y el superior apagado. |
 | `gate_h`, `gate_l` | Salida | Compuertas del transistor superior e inferior. |
 
 ```mermaid
 stateDiagram-v2
     [*] --> OFF
-    OFF --> DT_TO_HIGH: running ∧ s = 1
-    OFF --> DT_TO_LOW: running ∧ s = 0
+    OFF --> DT_TO_HIGH: allow ∧ s = 1
+    OFF --> DT_TO_LOW: allow ∧ s = 0
     DT_TO_HIGH --> HIGH_ON: cnt = dead_time
     DT_TO_HIGH --> DT_TO_LOW: s = 0
     HIGH_ON --> DT_TO_LOW: s = 0
     DT_TO_LOW --> LOW_ON: cnt = dead_time
     DT_TO_LOW --> DT_TO_HIGH: s = 1
     LOW_ON --> DT_TO_HIGH: s = 1
-    HIGH_ON --> OFF: ¬running
-    LOW_ON --> OFF: ¬running
-    DT_TO_HIGH --> OFF: ¬running
-    DT_TO_LOW --> OFF: ¬running
+    HIGH_ON --> OFF: ¬allow
+    LOW_ON --> OFF: ¬allow
+    DT_TO_HIGH --> OFF: ¬allow
+    DT_TO_LOW --> OFF: ¬allow
 ```
 
 | Estado | `gate_h` | `gate_l` |
@@ -752,7 +777,9 @@ La máquina queda en `OFF`, con las dos compuertas en 0.
 
 #### Casos especiales y condiciones de borde
 
-Si `s` cambia otra vez antes de que termine el tiempo muerto, la máquina pasa directo al otro estado de espera sin encender ningún transistor. Ese pulso se pierde, pero nunca hay cortocircuito. Si `running` cae a 0, se va a `OFF` desde cualquier estado.
+**Precarga del bootstrap.** Cada IR2110 alimenta el MOSFET superior con un capacitor bootstrap que solo se carga mientras conduce el inferior. Al liberar las compuertas el capacitor está descargado, así que durante los primeros `PRECHARGE_CYC` ciclos (2000 = 20 µs por defecto) la señal `precharge` mantiene encendidos los dos MOSFET inferiores, lo que deja $v_{AB} = 0$ en la carga. Al terminar, la máquina sigue desde `LOW_ON` y respeta el tiempo muerto antes del primer pulso superior. Encender los inferiores directamente es seguro porque los superiores ya están apagados. La duración es un parámetro del IP y se puede ajustar cuando se conozca el capacitor bootstrap.
+
+Si `s` cambia otra vez antes de que termine el tiempo muerto, la máquina pasa directo al otro estado de espera sin encender ningún transistor. Ese pulso se pierde, pero nunca hay cortocircuito. Si `allow` cae a 0 (se deshabilita el PWM, se borra `gates_en` o hay una falla), se va a `OFF` desde cualquier estado y las compuertas quedan en 0 en el ciclo siguiente.
 
 #### Estrategia de validación
 
@@ -887,16 +914,23 @@ Una vez completada la integración, esta tabla deberá actualizarse con los valo
 
 ### 8.2 Registros del periférico PWM
 
-Los offsets son relativos a la dirección base que asigne Vivado. Los registros 0x00 y 0x04 son los que define el enunciado. El 0x08 lo agregamos para el tiempo muerto.
+Los offsets son relativos a la dirección base que asigne Vivado. Los registros 0x00 y 0x04 son los que define el enunciado. El 0x08 lo agregamos para el tiempo muerto, y los bits 4 a 6 de 0x00 y el registro 0x0C para el contrato C4.
 
 **0x00 — CTRL_STATUS** (reset `0x0000_0000`)
 
 | Bits | Campo | Acceso | Descripción |
 |---|---|---|---|
-| 0 | `enable` | R/W | 1 habilita el PWM. 0 apaga las cuatro compuertas. |
-| 2:1 | `freq_sel` | R/W | `00` = 5 kHz, `01` = 10 kHz, `10` = 20 kHz, `11` = 40 kHz. |
+| 0 | `enable` | R/W | 1 hace correr la portadora y el trigger. 0 detiene todo y apaga las cuatro compuertas. |
+| 2:1 | `freq_sel` | R/W | `00` = 10 kHz, `01` = 15 kHz, `10` = 20 kHz, `11` = 20 kHz. |
 | 3 | `running` | Solo lectura | 1 si el generador está activo. |
-| 31:4 | — | Reservado | Se leen como 0. |
+| 4 | `gates_en` | R/W | 1 libera las compuertas en el siguiente pico, con 20 µs de precarga del bootstrap. 0 las apaga de inmediato. Una falla lo borra. |
+| 5 | `gates_on` | Solo lectura | 1 si las compuertas están conmutando. |
+| 6 | `fault` | Solo lectura | Estado de la entrada `fault_i`. |
+| 7 | `sync_arm` | R/W | 1 arma la sincronización con el Timer. Solo se arma si en la misma escritura `enable` = 1 y `gates_en` = 0. Se borra solo al sincronizar. |
+| 8 | `sync_done` | Solo lectura | 1 cuando ya se sincronizó con `sync_start_i`. Vuelve a 0 al deshabilitar el PWM. |
+| 9 | `precharge` | Solo lectura | 1 durante la precarga del bootstrap. |
+| 10 | `power_ready` | Solo lectura | 1 cuando las compuertas conmutan normalmente (terminó la precarga). |
+| 31:11 | — | Reservado | Se leen como 0. |
 
 **0x04 — DUTY_REF** (reset `0x0000_0000`)
 
@@ -912,7 +946,16 @@ Los offsets son relativos a la dirección base que asigne Vivado. Los registros 
 | 9:0 | `dead_time` | R/W | Tiempo muerto en ciclos de 10 ns. Se satura entre 20 y 1023. |
 | 31:10 | — | Reservado | Se leen como 0. |
 
+**0x0C — SYNC_PHASE** (reset `0x0000_03E8`)
+
+| Bits | Campo | Acceso | Descripción |
+|---|---|---|---|
+| 13:0 | `sync_phase` | R/W | Posición en la que se carga la portadora (subiendo) al sincronizar. Reset en 1000 (10 µs a 20 kHz). Solo se puede escribir con el PWM deshabilitado y con un valor menor que N; si no, la escritura responde `SLVERR`. |
+| 31:14 | — | Reservado | Se leen como 0. |
+
 Los cambios en `freq_sel`, `duty_ref` y `dead_time` se aplican en el siguiente valle de la portadora.
+
+Secuencia de uso desde el firmware: con el PWM deshabilitado, escribir DUTY_REF, DEADTIME y SYNC_PHASE; escribir CTRL_STATUS con `enable` = 1, `sync_arm` = 1 y `gates_en` = 0 (WARMUP); arrancar el AXI Timer, cuyo primer `generateout0` alinea la portadora (`sync_done` = 1); y al pasar a RUNNING, escribir `gates_en` = 1 y esperar `power_ready` = 1. Para detener el puente H basta con `gates_en` = 0, sin perder la sincronización.
 
 ### 8.3 Registros de la interfaz ADC/XADC
 
@@ -1365,7 +1408,7 @@ El límite de aceptación temporal es satisfacer todas las desigualdades de la s
 | C1 | Tarjeta, canal, pinout y rango analógico | Plataforma, adquisición y PEDP | Esquema y constraints verificados |
 | C2 | Offset, ganancia, signo y umbrales raw | Adquisición y PEDP | Calibración registrada |
 | C3 | Ts y fPWM compatibles con trigger en valle y ancho de cuatro ciclos | Equipo digital y PEDP | Presupuesto temporal y PR coherentes |
-| C4 | Ampliación del PWM para sync_start_i, carga de fase y bloqueo de compuertas independiente de la portadora | Plataforma, PWM y firmware | Simulación conjunta sin deriva, prioridad de bloqueo y liberación en valle |
+| C4 | Ampliación del PWM para sync_start_i, carga de fase y bloqueo de compuertas independiente de la portadora | Plataforma, PWM y firmware | **Acordado e implementado en el PWM** (`gates_en`, `sync_start_i`, SYNC_PHASE). Verificado en la simulación del PWM (T10, T11 y T13). Por el bootstrap, la liberación se hace en el pico con precarga y no en el valle. Falta la simulación conjunta con el Timer |
 | C5 | Validación de CTRL_STATUS/DUTY_REF/DEADTIME, Q1.15 y límites por frecuencia/tiempo muerto | PWM y firmware | Tabla y driver compatibles |
 | C6 | Ecuación PR, coeficientes y anti-windup | PEDP y firmware | Vectores de referencia aprobados |
 | C7 | WCET float32, memoria, reloj de bus y combinación Vivado/Vitis/BSP | Plataforma y firmware | Tiempo/linker map aceptables y versiones registradas |
@@ -1377,11 +1420,18 @@ La habilitación del lazo integrado requiere cerrar estos contratos. Las pruebas
 
 | Tema | Propuesta actual | Responsable / con quién se acuerda | Estado |
 |---|---|---|---|
-| Frecuencia de conmutación | 5 / 10 / 20 / 40 kHz | Keylor – PEDP | Pendiente |
-| Tiempo muerto | 1 µs inicial, ajustable de 0,2 a 10,23 µs | Keylor – PEDP | Pendiente |
-| Nivel lógico y polaridad de las compuertas | 3,3 V, activo en alto | Keylor – PEDP | Pendiente |
+| Frecuencia de conmutación | 10 / 15 / 20 kHz | Keylor – PEDP | Confirmado |
+| Driver y MOSFET | 2 × IR2110 (HIN/LIN separados, sin tiempo muerto interno), 4 × IRF540N, accionamiento a 12 V | Keylor – PEDP | Confirmado |
+| Tiempo muerto | 1 µs (100 ciclos), ajustable de 0,2 a 10,23 µs | Keylor – PEDP | Confirmado; se comprobará en pruebas |
+| Nivel lógico y polaridad de las compuertas | 3,3 V, activo en alto | Keylor – PEDP | Confirmado |
+| Mapeo de compuertas | `gate_ah_o`→FETD4, `gate_al_o`→FETD2 (pierna A, izquierda); `gate_bh_o`→FETD1, `gate_bl_o`→FETD3 (pierna B, derecha) | Keylor – PEDP | Confirmado |
+| Convención de signos | $v_{AB} = v_A - v_B$; corriente positiva de A hacia B | PEDP – firmware | Confirmado por PEDP; falta confirmar la polaridad del sensor |
+| Alimentación y carga | $V_{dc}$ = 24 V; R = 5 Ω, L = 30 mH; $m pprox 0{,}445$ para 1 A pico | PEDP | Confirmado |
+| Bootstrap | Precarga de 20 µs al liberar las compuertas; duty máximo por definir | Keylor – PEDP | Precarga implementada; duty máximo pendiente |
+| Estado seguro | Las cuatro compuertas en 0 | Keylor – PEDP | Confirmado |
 | Formato de `duty_ref` | Q1.15 con signo, saturado a ±0,95 | PWM – firmware | Pendiente |
-| Instante del trigger del ADC | Valle de la portadora, pulso de 4 ciclos | PWM – firmware | Pendiente |
+| Instante del trigger del ADC | Valle de la portadora, pulso de 4 ciclos | PWM – firmware | Acordado |
+| Señal de falla de la etapa de potencia | No hay señal automática de sobrecorriente; `fault_i` se conecta a 0. La etapa tiene un interruptor manual a GND, por confirmar sobre qué pin actúa | Keylor – PEDP | Pendiente |
 
 ---
 
@@ -1398,7 +1448,7 @@ La habilitación del lazo integrado requiere cerrar estos contratos. Las pruebas
   La separación entre hardware y software permite ejecutar el algoritmo de control en MicroBlaze V y delegar las funciones que requieren temporización precisa a los periféricos especializados. Esta distribución favorece la modularidad, la integración progresiva y la verificación independiente de los componentes del sistema.
 
 
-- **Periférico PWM:** todo el periférico trabaja con el mismo reloj de 100 MHz del procesador, lo que simplifica el diseño y el timing. Se usó una portadora triangular para tener pulsos centrados y un buen punto de muestreo en el valle. `duty_ref` va en Q1.15 porque la referencia del PR es senoidal (positiva y negativa) y así el voltaje promedio queda lineal con el valor escrito. Los cambios se aplican en el valle mediante registros sombra para no cortar pulsos, y al deshabilitar se apagan las compuertas de inmediato por seguridad. Se agregó el registro DEADTIME porque el enunciado pide tiempo muerto configurable y los dos registros sugeridos no tienen un campo para eso.
+- **Periférico PWM:** todo el periférico trabaja con el mismo reloj de 100 MHz del procesador, lo que simplifica el diseño y el timing. Se usó una portadora triangular para tener pulsos centrados y un buen punto de muestreo en el valle. `duty_ref` va en Q1.15 porque la referencia del PR es senoidal (positiva y negativa) y así el voltaje promedio queda lineal con el valor escrito. Los cambios se aplican en el valle mediante registros sombra para no cortar pulsos, y al deshabilitar se apagan las compuertas de inmediato por seguridad. Se agregó el registro DEADTIME porque el enunciado pide tiempo muerto configurable y los dos registros sugeridos no tienen un campo para eso. Como los IR2110 usan bootstrap, las compuertas se liberan en el pico de la portadora con una precarga de 20 µs de los MOSFET inferiores, para que el lado alto no arranque con el capacitor descargado.
 - **Adquisición:** XADC Wizard con wrapper propio separa conversión y bus; DATA/SEQ/TIME se publican juntos y SEQ detecta muestras perdidas. ADC_TICKS permite medir tiempo sin confundirlo con un timestamp congelado. El timeout bloquea hasta reset para descartar respuestas tardías.
 - **Software:** ISR acotada para el control y main para UART/botones. Dos bancos evitan copiar el histórico dentro de la ISR. El procesamiento float32 y el caso base de 20 kHz están sujetos a medición y acuerdos C1–C8 de la sección 10. Q1.15 corresponde al formato del diseño PWM.
 
@@ -1420,11 +1470,15 @@ Los casos siguientes definen el plan de validación. Su ejecución y los resulta
 | T2 | Escritura y lectura de registros | Lo leído coincide con lo escrito. `running` no se puede escribir. |
 | T3 | Saturación | `duty_ref` fuera de rango se lee como ±0,95. `dead_time` se limita entre 20 y 1023. |
 | T4 | Frecuencias | El período medido es 2N ciclos para cada `freq_sel`. |
-| T5 | Cambio de frecuencia en funcionamiento | El cambio ocurre en el valle, sin períodos raros. |
+| T5 | Cambio de frecuencia en funcionamiento | De 20 a 15 kHz: el período en curso termina completo y el siguiente ya dura 6666 ciclos. |
 | T6 | Modulación unipolar | Los anchos de pulso de A y B coinciden con los esperados para varios valores de $m$. |
 | T7 | Tiempo muerto | Las compuertas de una pierna nunca están en 1 al mismo tiempo, y el intervalo muerto dura lo configurado. |
 | T8 | Trigger | Un pulso por período, alineado con el valle. Ninguno si el PWM está deshabilitado. |
 | T9 | Enable | Al deshabilitar, las compuertas se apagan de inmediato y `running` pasa a 0. |
+| T10 | `gates_en` | Con `gates_en` = 0 la portadora y el trigger corren y las compuertas quedan en 0. Al activarlo, las compuertas se liberan en el pico. Al desactivarlo, se apagan de inmediato. |
+| T11 | `sync_start_i` y `sync_arm` | Sin armar, el pulso se ignora. Armado, la portadora se carga una sola vez en SYNC_PHASE y `sync_done` = 1. `adc_trigger_o` solo sale después de sincronizar. SYNC_PHASE responde `SLVERR` con el PWM corriendo o con un valor mayor o igual que N. |
+| T12 | `fault_i` | Las compuertas se apagan, `gates_en` se borra y no se rearma solo al quitar la falla. |
+| T13 | Arranque con bootstrap | Para m = 0, 0,445 y 0,95, los MOSFET inferiores encienden primero y conducen al menos 20 µs antes del primer pulso superior. `precharge` y `power_ready` reflejan el estado. |
 
 La misma simulación se corre después sobre el diseño ya implementado (simulación post-implementación temporizada).
 
@@ -1549,6 +1603,7 @@ El CSV se confronta con la captura binaria y sus metadatos; la conversión no de
 | Riesgo | Mitigación |
 |---|---|
 | Cortocircuito en una pierna del puente H por un error en el PWM | Máquina de estados de tiempo muerto, revisión en simulación y medición con osciloscopio con la potencia apagada antes de energizar. |
+| Capacitor bootstrap descargado o sin recarga suficiente | Precarga de 20 µs al liberar las compuertas. En operación, limitar m en el firmware: a 24 V el punto nominal es 0,445, pero si se usa 12 V se acerca a 0,9 y el MOSFET inferior conduce muy poco por período. |
 | El equipo de potencia define tarde la frecuencia o el tiempo muerto | Ambos se pueden cambiar sin rediseñar: la frecuencia es un parámetro y el tiempo muerto un registro. |
 | Muestra incoherente, perdida o antigua | Guardas SEQ1/SEQ2, secuencia esperada, antigüedad y transición a FAULT |
 | Incumplimiento del deadline de escritura | Medir latencia/WCET y margen hasta el latch con y sin UART; bloquear compuertas ante fallo |
