@@ -16,7 +16,7 @@ module tb_pwm_controller;
     always #5 clk = ~clk;  // 100 MHz
 
     logic        rst_n;
-    logic [3:0]  awaddr, araddr;
+    logic [4:0]  awaddr, araddr;
     logic        awvalid, awready, wvalid, wready, bvalid, bready;
     logic        arvalid, arready, rvalid, rready;
     logic [31:0] wdata, rdata;
@@ -64,7 +64,7 @@ module tb_pwm_controller;
     wire        s_b      = dut.u_core.s_b;
     wire        gates_on = dut.u_core.gates_on_o;
 
-    localparam logic [3:0] A_CTRL = 4'h0, A_DUTY = 4'h4, A_DEAD = 4'h8, A_PHASE = 4'hC;
+    localparam logic [4:0] A_CTRL = 5'h0, A_DUTY = 5'h4, A_DEAD = 5'h8, A_PHASE = 5'hC;
 
     // ---------------- Contadores de resultados ----------------
     int n_pass = 0, n_fail = 0;
@@ -137,7 +137,7 @@ module tb_pwm_controller;
 
     // ---------------- Tareas AXI4-Lite (BFM) ----------------
     // order: 0 = AW y W juntos, 1 = AW primero, 2 = W primero
-    task automatic axi_write(input logic [3:0] addr, input logic [31:0] data,
+    task automatic axi_write(input logic [4:0] addr, input logic [31:0] data,
                              input logic [3:0] strb = 4'hF, input int order = 0,
                              input int bready_delay = 0);
         bit aw_done = 0, w_done = 0;
@@ -162,7 +162,7 @@ module tb_pwm_controller;
         bready = 1'b0;
     endtask
 
-    task automatic axi_read(input logic [3:0] addr, output logic [31:0] data,
+    task automatic axi_read(input logic [4:0] addr, output logic [31:0] data,
                             input int rready_delay = 0);
         @(negedge clk);
         araddr = addr; arvalid = 1'b1; rready = 1'b0;
