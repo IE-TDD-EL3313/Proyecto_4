@@ -1,11 +1,12 @@
 # Rebuild the integrated system from the shared MicroBlaze project.
-# vivado -mode batch -source scripts/build_nexys4.tcl -tclargs validate|synth|bitstream
+# vivado -mode batch -source scripts/build_nexys4.tcl -tclargs validate|synth|bitstream ?output_dir?
 set repo [file normalize [file join [file dirname [info script]] ..]]
 set mode [lindex $argv 0]
 if {$mode eq ""} {set mode validate}
 if {$mode ni {validate synth bitstream}} {error "Use validate, synth or bitstream"}
 set_param general.maxThreads 2
 set out [file join $repo build nexys4_integrated]
+if {[llength $argv] > 1} {set out [file normalize [lindex $argv 1]]}
 file mkdir $out
 set scratch [file normalize [file join $::env(TEMP) tdd4_i_[pid]]]
 file mkdir $scratch

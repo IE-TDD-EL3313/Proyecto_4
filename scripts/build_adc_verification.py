@@ -4,6 +4,7 @@ Build three acquisition-only applications against the integrated 128 KiB XSA.
 No controller calibration/PR flags are enabled and no power gates are requested.
 """
 from pathlib import Path
+import argparse
 import hashlib
 import json
 import os
@@ -19,13 +20,24 @@ from audit_adc_memory import audit_elf
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    output = root / "build/adc_verification/firmware"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--xsa", type=Path, default=root / "build/nexys4_integrated/nexys4_control_hw.xsa")
+    parser.add_argument("--output", type=Path, default=root / "build/adc_verification/firmware")
+    parser.add_argument("--workspace", type=Path)
+    parser.add_argument("--variant", choices=("10khz", "15khz_nominal", "20khz"))
+    args = parser.parse_args()
+    output = args.output.resolve()
+    handoff = args.xsa.resolve(strict=True)
+    if args.workspace:
+        workspace = args.workspace.resolve()
+        workspace.mkdir(parents=True, exist_ok=False)
+        xsa = handoff
+    else:
+        scratch = Path(tempfile.mkdtemp(prefix="tdd4_adc_fw_"))
+        xsa = scratch / "control.xsa"
+        shutil.copy2(handoff, xsa)
+        workspace = scratch / "workspace"
     output.mkdir(parents=True, exist_ok=True)
-    handoff = root / "build/nexys4_integrated/nexys4_control_hw.xsa"
-    scratch = Path(tempfile.mkdtemp(prefix="tdd4_adc_fw_"))
-    xsa = scratch / "control.xsa"
-    shutil.copy2(handoff, xsa)
-    workspace = scratch / "workspace"
     (output / "workspace.txt").write_text(str(workspace), encoding="utf-8")
     client = vitis.create_client()
     products = []
@@ -36,6 +48,8 @@ def main():
         platform.build()
         xpfm = client.find_platform_in_repos("adc_platform")
         for frequency, label in enumerate(("10khz", "15khz_nominal", "20khz")):
+            if args.variant and label != args.variant:
+                continue
             name = "adc_verify_" + label
             app = client.create_app_component(name=name, platform=xpfm, domain="adc", template="empty_application")
             app.import_files(from_loc=str(root / "vitis/app"), dest_dir_in_cmp="src/app",
@@ -64,7 +78,9 @@ def main():
                 raise RuntimeError("Application exceeds shared local memory")
             shutil.copy2(elf, output / (name + ".elf"))
             shutil.copy2(map_file, output / (name + ".map"))
-            size = Path(os.environ["XILINX_VITIS"]) / "gnu/riscv/nt/bin/riscv64-unknown-elf-size.exe"
+            tool_dir = "nt/bin" if os.name == "nt" else "lin/bin"
+            extension = ".exe" if os.name == "nt" else ""
+            size = Path(os.environ["XILINX_VITIS"]) / "gnu/riscv" / tool_dir / f"riscv64-unknown-elf-size{extension}"
             report = subprocess.check_output([str(size), "-A", str(elf)], text=True, encoding="ascii")
             (output / (name + "_sections.txt")).write_text(report, encoding="utf-8")
             products.append({"elf": name + ".elf", "frequency_code": frequency,
@@ -73,7 +89,7 @@ def main():
         (output / "summary.json").write_text(json.dumps({"products": products,
             "xsa_sha256": hashlib.sha256(handoff.read_bytes()).hexdigest(),
             "workspace": str(workspace), "executed_on_fpga": False}, indent=2), encoding="utf-8")
-        print("PASS: three acquisition-only ELF applications linked; physical verification remains required")
+        print(f"PASS: {len(products)} acquisition-only ELF applications linked; physical verification remains required")
     finally:
         vitis.dispose()
 

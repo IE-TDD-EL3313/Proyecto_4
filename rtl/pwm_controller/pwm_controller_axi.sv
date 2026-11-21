@@ -22,7 +22,7 @@ module pwm_controller_axi #(
     parameter logic        [13:0] N_01            = 14'd3333,   // 15 kHz (15.0015 kHz)
     parameter logic        [13:0] N_10            = 14'd2500,   // 20 kHz
     parameter logic        [13:0] N_11            = 14'd2500,   // 20 kHz (repetido)
-    parameter logic signed [15:0] DUTY_MAX        = 16'sd31129, // ~0.95
+    parameter int                 DUTY_MAX        = 31129,     // ~0.95
     parameter logic        [9:0]  DT_MIN          = 10'd20,
     parameter logic        [9:0]  DT_MAX          = 10'd1023,
     parameter logic        [9:0]  DT_RESET        = 10'd100,    // 1 us (confirmado con PEDP)
@@ -82,7 +82,7 @@ module pwm_controller_axi #(
 
     pwm_axi_regs #(
         .ADDR_W      (C_S_AXI_ADDR_WIDTH),
-        .DUTY_MAX    (DUTY_MAX),
+        .DUTY_MAX    (16'(DUTY_MAX)),
         .DT_MIN      (DT_MIN),
         .DT_MAX      (DT_MAX),
         .DT_RESET    (DT_RESET),

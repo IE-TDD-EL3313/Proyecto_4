@@ -2,6 +2,9 @@
    Default mode acquires raw ADC codes with all power gates blocked. */
 #include "board_config.h"
 #include "../app/control_runtime.h"
+#ifdef TDD_DIAGNOSTIC_HISTORY
+#include "../app/adc_verify.h"
+#endif
 #include "xil_io.h"
 #include "xil_exception.h"
 #include "xintc.h"
@@ -18,7 +21,15 @@
 #define UART_BASE UINT32_C(0x40600000)
 #define GPIO_BASE UINT32_C(0x40000000)
 #define INTC_BASE UINT32_C(0x41200000)
+#ifdef TDD_DIAGNOSTIC_HISTORY
+static union {
+    struct tdd_runtime control;
+    struct tdd_adc_verify raw;
+} history; /* Only one mode owns the two capture banks. */
+#define runtime (history.control)
+#else
 static struct tdd_runtime runtime; /* 48 KiB capture arrays: never put on stack */
+#endif
 static struct tdd_transmitter transmitter;
 static XIntc intc;
 static bool diagnostic;
@@ -48,13 +59,28 @@ static bool gates_ready(void *ctx) {(void)ctx;return tdd_pwm_ready(&pwm);}
 static void marker(void *ctx,bool high)
 {
     (void)ctx;
-    uint32_t fault=(diagnostic || runtime.control.state==TDD_FAULT)?2u:0u;
-    write32((void *)(uintptr_t)GPIO_BASE,8u,fault|(high?1u:0u));
+    bool fault;
+#ifdef TDD_DIAGNOSTIC_HISTORY
+    if(diagnostic) fault=history.raw.state==TDD_VERIFY_FAULT;
+    else fault=runtime.control.state==TDD_FAULT;
+#else
+    fault=diagnostic || runtime.control.state==TDD_FAULT;
+#endif
+    write32((void *)(uintptr_t)GPIO_BASE,8u,(fault?2u:0u)|(high?1u:0u));
 }
 static void irq(void *ctx)
 {
     (void)ctx;
-    if(diagnostic){marker(NULL,true);(void)tdd_timer_ack(&timer);marker(NULL,false);return;}
+    if(diagnostic){
+        marker(NULL,true);
+#ifdef TDD_DIAGNOSTIC_HISTORY
+        tdd_adc_verify_irq(&history.raw);
+#else
+        (void)tdd_timer_ack(&timer);
+#endif
+        marker(NULL,false);
+        return;
+    }
     /* Single hart, non-nested ISR: main cannot publish between this load and
        clear. Avoid an atomic RMW: the configured RV32IM CPU has no A extension. */
     unsigned code=atomic_load_explicit(&amplitude_request,memory_order_acquire);
@@ -75,6 +101,11 @@ static bool prepare(void)
         if(read32(adc.context,24u)-start>1000000u)break; /* 10 ms bound */
     }
     if(!ready)return false;
+    diagnostic=!(TDD_SENSING_CONFIRMED && TDD_PR_CONFIRMED &&
+        TDD_MODULATION_LIMIT_CONFIRMED && TDD_PROTECTION_CONFIRMED && TDD_TIMING_CONFIRMED);
+#ifdef TDD_DIAGNOSTIC_HISTORY
+    if(diagnostic)return tdd_adc_verify_prepare(&history.raw,adc,pwm,timer,frequency_code);
+#endif
     uint32_t period=tdd_pwm_period(frequency_code);
     if(!period)return false;
     struct tdd_config cfg={0};
@@ -84,8 +115,6 @@ static bool prepare(void)
     cfg.deadtime_cycles=TDD_BOARD_DEADTIME;cfg.offset_code=TDD_ADC_OFFSET;
     cfg.gain_a_per_code=TDD_ADC_GAIN;cfg.vdc=TDD_BOARD_VDC;cfg.m_max=TDD_M_MAX;
     cfg.amplitude_a=.2f;cfg.b0=TDD_B0;cfg.b1=TDD_B1;cfg.b2=TDD_B2;cfg.a1=TDD_A1;cfg.a2=TDD_A2;
-    diagnostic=!(TDD_SENSING_CONFIRMED && TDD_PR_CONFIRMED &&
-        TDD_MODULATION_LIMIT_CONFIRMED && TDD_PROTECTION_CONFIRMED && TDD_TIMING_CONFIRMED);
     if(!diagnostic){
         struct tdd_platform io={.adc=adc,.pwm=pwm,.timer=timer,.context=NULL,
             .block_gates=block,.request_gates=request_gates,.gates_ready=gates_ready,.mark_isr=marker};
@@ -95,11 +124,13 @@ static bool prepare(void)
     write32(adc.context,0,3u); /* event acquisition, held off by ADC trigger gate */
     return tdd_pwm_arm(&pwm,frequency_code);
 }
+#ifndef TDD_DIAGNOSTIC_HISTORY
 static void hex_word(char *dst,uint32_t value,unsigned digits)
 {
     const char hex[]="0123456789ABCDEF";
     for(unsigned n=0;n<digits;++n)dst[n]=hex[(value>>(4u*(digits-1u-n)))&15u];
 }
+#endif
 int main(void)
 {
     Xil_ExceptionDisable();atomic_init(&amplitude_request,0);
@@ -116,7 +147,13 @@ int main(void)
     Xil_ExceptionRegisterHandler(XIL_EXCEPTION_ID_INT,(Xil_ExceptionHandler)XIntc_InterruptHandler,&intc);
     if(!prepare())goto failed;
     marker(NULL,false);Xil_ExceptionEnable();tdd_timer_start(&timer);
-    uint32_t changed[3]={0},raw_prev=0,stable=0,last_diag=0;
+    uint32_t changed[3]={0},raw_prev=0,stable=0;
+#ifdef TDD_DIAGNOSTIC_HISTORY
+    struct tdd_capture *capture=diagnostic?&history.raw.capture:&runtime.capture;
+#else
+    struct tdd_capture *capture=diagnostic?NULL:&runtime.capture;
+    uint32_t last_diag=0;
+#endif
     unsigned amplitude=0;uint8_t bytes[32];size_t used=0,pos=0;
     for(;;){
         uint32_t now=read32(adc.context,24u),buttons=read32((void *)(uintptr_t)GPIO_BASE,0)&7u;
@@ -125,7 +162,7 @@ int main(void)
             if(((buttons^stable)&bit) && now-changed[n]>=2000000u){
                 stable^=bit;
                 if(stable&bit){
-                    if(n==0 && !diagnostic)(void)tdd_capture_request(&runtime.capture);
+                    if(n==0 && capture)(void)tdd_capture_request(capture);
                     if(n==1 && !diagnostic){amplitude=(amplitude+1u)%3u;
                         atomic_store_explicit(&amplitude_request,amplitude+1u,memory_order_release);}
                     if(n==2 && !diagnostic && atomic_load_explicit(&published_state,memory_order_acquire)==TDD_FAULT && !used &&
@@ -143,10 +180,12 @@ int main(void)
         raw_prev=buttons;
         if(!used){
             pos=0;
-            if(!diagnostic){
-                if(!transmitter.active)(void)tdd_tx_begin(&runtime.capture,&transmitter);
-                used=tdd_tx_read(&runtime.capture,&transmitter,bytes,sizeof bytes);
-            }else if(now-last_diag>=10000000u){ /* raw codes at 10 Hz, no invented amperes */
+            if(capture){
+                if(!transmitter.active)(void)tdd_tx_begin(capture,&transmitter);
+                used=tdd_tx_read(capture,&transmitter,bytes,sizeof bytes);
+            }
+#ifndef TDD_DIAGNOSTIC_HISTORY
+            else if(now-last_diag>=10000000u){ /* raw codes at 10 Hz, no invented amperes */
                 struct tdd_sample sample;last_diag=now;
                 if(tdd_adc_read(&adc,&sample)==TDD_ADC_OK){
                     const char line[]="RAW=0x0000 SEQ=0x00000000\r\n";
@@ -154,6 +193,7 @@ int main(void)
                     hex_word((char *)bytes+6,sample.raw,4);hex_word((char *)bytes+17,sample.seq,8);
                 }
             }
+#endif
         }
         for(unsigned sent=0;sent<8u && pos<used;++sent){
             if(read32((void *)(uintptr_t)UART_BASE,8u)&8u)break; /* TX full */
