@@ -49,3 +49,8 @@ __pycache__/
 # Editores
 .vscode/
 .idea/
+
+# Evidencias UART verificadas del periférico PWM (Issue #13)
+!resultados/axi/uart_pwm_axi_test.log
+!resultados/axi/uart_pwm_axi_test_retest.log
+!resultados/axi/uart_pwm_axi_test_final.log
