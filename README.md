@@ -266,6 +266,7 @@ simulación e integración. Entre las integraciones registradas están:
 | #33 | `fix/firmware-vitis`: firmware y linker script |
 | #34 | `docs/informe-pwm`: informe y evidencias del PWM |
 | #35 | `fix/issue-13-evidencia-axi-pwm`: corrección y prueba AXI en placa |
+| #38 | `feature/integracion-control-pr`: integración final del control PR, pruebas seguras y evidencias en Nexys 4 |
 
 Los mensajes del historial identifican cambios de tipo `feat`, `fix`, `test`,
 `docs` y `chore`. Las evidencias asociadas a los problemas encontrados se
