@@ -1,0 +1,20 @@
+DIAGNOSTICO PWM-XADC CONTINUO
+Nexys 4 Rev. B | MicroBlaze V 100 MHz
+PWM interno: 10 kHz | Timer: 5 kHz
+Duracion nominal: 60 segundos
+Sin control PR ni calibracion de corriente
+
+========== RESULTADOS ==========
+ISR ejecutadas: 300000
+Consultas XADC: 300000
+Muestras nuevas: 300000
+Sin muestra: 0
+Canal erroneo: 0
+Fallas: 0
+PWM enable final: 0
+PWM running final: 0
+================================
+
+Alcance: continuidad digital entre el disparo PWM, XADC y la ISR. La entrada
+analógica no estaba calibrada como corriente, por lo que esta prueba no valida
+amplitud, offset ni seguimiento del lazo cerrado.

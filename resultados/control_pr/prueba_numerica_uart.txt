@@ -1,0 +1,26 @@
+PR CONTINUO - PRUEBA INDEPENDIENTE
+==================================
+
+Frecuencia de muestreo: 5000 Hz
+Frecuencia de referencia: 50 Hz
+
+[1] PRUEBA NUMERICA ORIGINAL
+D4 PR SELFTEST: PASS (1000 muestras, 12 puntos)
+RESULTADO: PASS
+
+[2] INICIALIZACION
+PASS: PR detenido y fase cero
+
+[3] CONFIGURACION DE AMPLITUD
+PASS: amplitudes validas e invalidas
+
+[4] CICLO DE REFERENCIA
+PASS: 100 muestras, fase completa
+
+[5] DETENCION DEL CONTROLADOR
+PASS: controlador detenido
+
+RESULTADO GLOBAL: TODAS LAS PRUEBAS PASS
+
+Alcance: prueba numérica ejecutada en MicroBlaze V. No incluye planta,
+sensor de corriente ni actuación sobre el puente H.
