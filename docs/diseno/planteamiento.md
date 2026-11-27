@@ -12,6 +12,20 @@ La solución propuesta utiliza un procesador MicroBlaze V, basado en la arquitec
 El funcionamiento del sistema se basa en un lazo de control cerrado. La corriente de la carga se obtiene mediante un sensor y una etapa de acondicionamiento analógico, cuya salida es digitalizada mediante el XADC de la FPGA. Posteriormente, el MicroBlaze V procesa la medición, ejecuta el algoritmo PR y actualiza la referencia del periférico PWM. Este último genera las señales necesarias para controlar el inversor y proporciona un evento de sincronización para la adquisición de corriente. Adicionalmente, se contempla el almacenamiento de muestras en memoria y su transmisión hacia una computadora mediante UART, con el propósito de supervisar y analizar el comportamiento del sistema.
 
 El desarrollo se realiza de manera coordinada entre Taller de Diseño Digital y el equipo responsable de la etapa de potencia (PEDP). Taller de Diseño Digital se encarga de diseñar e integrar la arquitectura embebida, los periféricos digitales, el firmware de control y los mecanismos de comunicación y validación. Por su parte, PEDP proporciona los parámetros eléctricos del inversor, las características del sensor y del acondicionamiento, así como el diseño y los coeficientes del controlador PR. Esta distribución permite establecer interfaces y requisitos de integración para verificar progresivamente el sistema antes de su operación conjunta con la etapa de potencia.
+
+### 1.1 Alcance alcanzado al cierre
+
+El diseño se implementó hasta la validación segura del subsistema digital. Se
+generó el sistema MicroBlaze V para Nexys 4, se integraron PWM, XADC, Timer y
+UART, se ejecutó la prueba numérica del PR y se observaron señales PWM físicas
+a 10 kHz. El lazo energizado no se ejecutó porque la entrada VAUX3 no recibió
+una señal dentro del intervalo de autocero definido. En consecuencia, las
+secciones siguientes documentan el diseño completo, pero las referencias de
+0,2, 0,5 y 1,0 A se mantienen como requisitos y no como resultados medidos.
+
+La evidencia final y sus limitaciones se resumen en la
+[matriz de cierre](../informe/matriz_cierre.md). Esta distinción evita mezclar
+decisiones de diseño, resultados de simulación y pruebas físicas.
 ---
 
 ## 2. Objetivos del proyecto
@@ -44,7 +58,7 @@ Diseñar, implementar y validar un sistema digital embebido basado en el procesa
 
 La arquitectura propuesta para el Proyecto 4 se basa en un sistema embebido implementado sobre la FPGA de la tarjeta Nexys 4 Rev. B, utilizando un procesador MicroBlaze V de arquitectura RISC-V. El sistema tiene como función principal ejecutar digitalmente el control de corriente de un inversor monofásico en configuración de puente H, mediante la integración de recursos de procesamiento, memoria, periféricos de comunicación, adquisición de señales y generación de PWM.
 
-El procesador MicroBlaze V opera con una frecuencia de reloj de 100 MHz y constituye la unidad central de procesamiento del sistema. Se considera una memoria local BRAM de 32 KiB, accesible mediante los controladores ILMB y DLMB, así como una caché de instrucciones de 8 KiB, cuya configuración deberá verificarse durante la implementación en Vivado. La memoria local permite almacenar el programa, sus variables y los datos utilizados durante la ejecución del controlador, mientras que el procesador coordina las operaciones de adquisición, procesamiento y actualización de los periféricos.
+El procesador MicroBlaze V opera con una frecuencia de reloj de 100 MHz y constituye la unidad central de procesamiento del sistema. La implementación final usa 128 KiB de BRAM local, accesible mediante ILMB y DLMB, y una caché de instrucciones de 8 KiB. La ampliación respecto del mínimo de 32 KiB fue necesaria para alojar el firmware y dos bancos de 2048 muestras. El procesador coordina las operaciones de adquisición, procesamiento y actualización de los periféricos.
 
 La comunicación entre el procesador y los periféricos se organiza mediante una interconexión AXI. Los periféricos previstos son AXI Timer, AXI UART Lite, AXI GPIO, un controlador PWM personalizado con interfaz AXI4-Lite y un bloque de adquisición de corriente basado en XADC. Esta organización permite separar las funciones de procesamiento de las tareas específicas de temporización, comunicación, adquisición y generación de señales digitales.
 
@@ -57,7 +71,7 @@ La ejecución periódica del algoritmo de control se coordina mediante AXI Timer
 Los principales bloques funcionales considerados son:
 
 - **MicroBlaze V:** procesador RISC-V encargado de ejecutar el firmware, el controlador PR discreto y las rutinas de supervisión del sistema.
-- **Memoria local BRAM:** recurso de almacenamiento de 32 KiB para instrucciones, variables y datos de ejecución, accesible mediante los controladores ILMB y DLMB.
+- **Memoria local BRAM:** 128 KiB para instrucciones, variables y dos bancos de captura, accesibles mediante ILMB y DLMB.
 - **Caché de instrucciones:** recurso de 8 KiB considerado para la configuración del procesador, sujeto a verificación de compatibilidad durante la implementación.
 - **AXI Interconnect:** estructura de comunicación que permite al procesador acceder a los registros de los periféricos conectados mediante interfaces AXI.
 - **AXI Timer:** periférico utilizado para establecer la temporización periódica del algoritmo de control.
@@ -189,7 +203,7 @@ El subsistema está compuesto por los siguientes recursos:
 | Componente | Especificación | Función |
 |---|---|---|
 | MicroBlaze V | Procesador RISC-V, 100 MHz | Ejecución del firmware y del controlador PR. |
-| BRAM local | 32 KiB | Almacenamiento de instrucciones, variables y datos. |
+| BRAM local | 128 KiB | Almacenamiento de instrucciones, variables y dos bancos de captura. |
 | Caché de instrucciones | 8 KiB | Recurso previsto para mejorar el acceso a instrucciones, sujeto a verificación de configuración. |
 | ILMB Controller | Interfaz de memoria local | Acceso a instrucciones almacenadas en BRAM. |
 | DLMB Controller | Interfaz de memoria local | Acceso a datos almacenados en BRAM. |
@@ -202,7 +216,7 @@ La organización propuesta se presenta en el siguiente diagrama:
 
 #### 6.1.2. Memoria local BRAM
 
-La arquitectura contempla una memoria local de 32 KiB implementada mediante recursos Block RAM de la FPGA.
+La arquitectura se implementó con 128 KiB de memoria local mediante recursos Block RAM de la FPGA. El valor mínimo inicial de 32 KiB no era suficiente para el programa y los dos bancos de captura.
 
 El procesador accede a esta memoria mediante dos interfaces diferenciadas:
 
@@ -372,7 +386,7 @@ El contador libre también se expone mediante ADC_TICKS en 0x18 para instrumenta
 |---|---|---|
 | clk, rst_n | Entrada | Reloj de 100 MHz y reset de lógica |
 | pwm_trigger_o | Entrada desde PWM | Pulso de cuatro ciclos en el valle; una solicitud por flanco ascendente |
-| VAUXP/VAUXN o VP/VN | Entrada analógica al XADC | Canal externo; selección pendiente |
+| VAUX3_P / VAUX3_N | Entrada analógica al XADC | Canal VAUX3 de la Nexys 4, pines A13/A14 |
 | convst | Salida al XADC | Pulso de inicio de N_convst ciclos; ancho por validar |
 | reset_xadc | Salida al XADC | Reset coordinado con el wrapper; esperar disponibilidad antes del primer disparo |
 | busy, eoc | Entrada desde XADC | Ocupación y conversión terminada |
@@ -875,21 +889,21 @@ La arquitectura del sistema utiliza un esquema de memoria mapeada para permitir 
 
 La memoria local BRAM se conecta al procesador mediante los controladores ILMB y DLMB, mientras que los periféricos se comunican a través de la interconexión AXI.
 
-Cada periférico dispone de una región de direcciones que permite acceder a sus registros de configuración, control, estado y datos. Las direcciones base y los rangos definitivos serán asignados y verificados mediante el Address Editor de Vivado durante la integración del Block Design.
+Cada periférico dispone de una región de direcciones para sus registros de configuración, control, estado y datos. Las direcciones finales se verificaron en el Address Editor y en el XSA de la adaptación Nexys 4.
 
 La siguiente tabla identifica los recursos que deberán incorporarse al mapa de memoria.
 
 | Recurso | Dirección base | Rango | Interfaz |
 |---|---|---|---|
-| BRAM local | Por asignar | 32 KiB | ILMB / DLMB |
-| AXI Timer | Por asignar | Según configuración del IP | AXI4-Lite |
-| AXI UART Lite | Por asignar | Según configuración del IP | AXI4-Lite |
-| AXI GPIO | Por asignar | Según configuración del IP | AXI4-Lite |
-| AXI Interrupt Controller | Por asignar | Según configuración del IP | AXI4-Lite |
-| PWM Controller | Por asignar | Según decodificación del periférico | AXI4-Lite |
-| Interfaz ADC/XADC | Por asignar | Según decodificación del periférico | AXI4-Lite |
+| BRAM local | `0x00000000–0x0001FFFF` | 128 KiB | ILMB / DLMB |
+| AXI Timer | `0x41C00000` | 64 KiB | AXI4-Lite |
+| AXI UART Lite | `0x40600000` | 64 KiB | AXI4-Lite |
+| AXI GPIO | `0x40000000` | 64 KiB | AXI4-Lite |
+| AXI Interrupt Controller | `0x41200000` | 64 KiB | AXI4-Lite |
+| PWM Controller | `0x44A00000` | 64 KiB | AXI4-Lite |
+| XADC Wizard | `0x44A10000` | 64 KiB | AXI4-Lite |
 
-El AXI Interrupt Controller se contempla como parte de la arquitectura propuesta para centralizar las solicitudes de interrupción de los periféricos y comunicarlas al MicroBlaze V. Su región de direcciones permitirá configurar y consultar el estado de las interrupciones. La conexión definitiva de las fuentes y la asignación de direcciones se verificarán durante la integración del Block Design en Vivado.
+El AXI Interrupt Controller centraliza la interrupción periódica del AXI Timer y la comunica al MicroBlaze V. Su región permite configurar y consultar el estado de las interrupciones.
 
 #### 8.1.1. Organización de los accesos
 
@@ -902,7 +916,7 @@ Esta separación permite utilizar la memoria local para las operaciones del firm
 
 #### 8.1.2. Asignación de direcciones
 
-Durante la implementación del Block Design se deberán verificar los siguientes aspectos:
+Durante la implementación del Block Design se verificaron los siguientes aspectos:
 
 1. Que todos los periféricos tengan regiones de direcciones válidas.
 2. Que no existan solapamientos entre las regiones asignadas.
@@ -910,7 +924,7 @@ Durante la implementación del Block Design se deberán verificar los siguientes
 4. Que las direcciones utilizadas por el firmware coincidan con las asignadas en Vivado.
 5. Que los rangos reservados sean compatibles con la decodificación de direcciones de cada módulo.
 
-Una vez completada la integración, esta tabla deberá actualizarse con los valores definitivos obtenidos del Address Editor.
+La tabla anterior contiene los valores finales utilizados por el firmware adaptado.
 
 ### 8.2 Registros del periférico PWM
 
@@ -997,7 +1011,7 @@ La interfaz adopta los registros de la especificación del PWM. CTRL_STATUS ocup
 
 DUTY_REF, freq_sel y DEADTIME se aplican en el siguiente valle mediante registros sombra. Los códigos freq_sel 00, 01, 10 y 11 corresponden a 5, 10, 20 y 40 kHz. El límite hardware de DUTY_REF es ±31129 códigos, equivalente a ±31129/32768 ≈ ±0,9499829. El firmware debe aplicar además el límite de modulación compatible con la frecuencia, el tiempo muerto y PEDP.
 
-El PWM documentado actualmente vincula enable con portadora, trigger y compuertas. El arranque en fase mediante sync_start_i y el bloqueo independiente de compuertas requerido por WARMUP son ampliaciones pendientes del contrato C4. Se deben acordar sus señales y prioridades antes de habilitar el lazo integrado.
+El PWM original vinculaba `enable` con portadora, trigger y compuertas. La versión integrada incorporó `sync_start_i`, carga de fase y bloqueo independiente de compuertas durante WARMUP. Para el cierre seguro se añadió además `pwm_output_guard.sv`, que fuerza las salidas físicas a cero en el bitstream de control mientras se valida el sensor.
 
 ### 8.4. Protocolo AXI4-Lite
 
@@ -1408,13 +1422,13 @@ El límite de aceptación temporal es satisfacer todas las desigualdades de la s
 | C1 | Tarjeta, canal, pinout y rango analógico | Plataforma, adquisición y PEDP | Esquema y constraints verificados |
 | C2 | Offset, ganancia, signo y umbrales raw | Adquisición y PEDP | Calibración registrada |
 | C3 | Ts y fPWM compatibles con trigger en valle y ancho de cuatro ciclos | Equipo digital y PEDP | Presupuesto temporal y PR coherentes |
-| C4 | Ampliación del PWM para sync_start_i, carga de fase y bloqueo de compuertas independiente de la portadora | Plataforma, PWM y firmware | **Acordado e implementado en el PWM** (`gates_en`, `sync_start_i`, SYNC_PHASE). Verificado en la simulación del PWM (T10, T11 y T13). Por el bootstrap, la liberación se hace en el pico con precarga y no en el valle. Falta la simulación conjunta con el Timer |
-| C5 | Validación de CTRL_STATUS/DUTY_REF/DEADTIME, Q1.15 y límites por frecuencia/tiempo muerto | PWM y firmware | Tabla y driver compatibles |
-| C6 | Ecuación PR, coeficientes y anti-windup | PEDP y firmware | Vectores de referencia aprobados |
+| C4 | Ampliación del PWM para sync_start_i, carga de fase y bloqueo de compuertas independiente de la portadora | Plataforma, PWM y firmware | Implementado y verificado en las pruebas T10, T11 y T13; el diagnóstico de 300000 ISR confirmó continuidad PWM-XADC |
+| C5 | Validación de CTRL_STATUS/DUTY_REF/DEADTIME y límites por frecuencia/tiempo muerto | PWM y firmware | Cerrado para la adaptación Nexys 4: `rtl/pwm_pr/` recibe milésimas y el firmware limita a ±850. El PWM original documentado conserva Q1.15 |
+| C6 | Ecuación PR, coeficientes y anti-windup | PEDP y firmware | Coeficientes recibidos el 20/11/2026 e incorporados; prueba numérica PASS. Solo hay saturación de salida, no anti-windup validado |
 | C7 | WCET float32, memoria, reloj de bus y combinación Vivado/Vitis/BSP | Plataforma y firmware | Tiempo/linker map aceptables y versiones registradas |
 | C8 | Reset de recuperación del wrapper/XADC y cotas CONVST/ADCCLK/watchdog | Plataforma y firmware | Sin respuesta tardía publicada; tiempos validados con dispositivo/IP |
 
-La habilitación del lazo integrado requiere cerrar estos contratos. Las pruebas de adquisición, temporización y firmware permanecen pendientes hasta disponer de evidencia de implementación y ensayo.
+La habilitación energizada del lazo requiere cerrar C1, C2, C7 y C8 con mediciones del sensor y la planta. Las pruebas digitales de adquisición, temporización y firmware sí se ejecutaron; sus resultados y límites están en el informe.
 
 ### 10.1 Parámetros de la etapa de potencia
 
@@ -1422,16 +1436,24 @@ La habilitación del lazo integrado requiere cerrar estos contratos. Las pruebas
 |---|---|---|---|
 | Frecuencia de conmutación | 10 / 15 / 20 kHz | Keylor – PEDP | Confirmado |
 | Driver y MOSFET | 2 × IR2110 (HIN/LIN separados, sin tiempo muerto interno), 4 × IRF540N, accionamiento a 12 V | Keylor – PEDP | Confirmado |
-| Tiempo muerto | 1 µs (100 ciclos), ajustable de 0,2 a 10,23 µs | Keylor – PEDP | Confirmado; se comprobará en pruebas |
+| Tiempo muerto | 1 µs (100 ciclos) en la adaptación final | Keylor – PEDP | Confirmado en configuración y simulación; las fotografías físicas requieren lectura con cursores |
 | Nivel lógico y polaridad de las compuertas | 3,3 V, activo en alto | Keylor – PEDP | Confirmado |
 | Mapeo de compuertas | `gate_ah_o`→FETD4, `gate_al_o`→FETD2 (pierna A, izquierda); `gate_bh_o`→FETD1, `gate_bl_o`→FETD3 (pierna B, derecha) | Keylor – PEDP | Confirmado |
 | Convención de signos | $v_{AB} = v_A - v_B$; corriente positiva de A hacia B | PEDP – firmware | Confirmado por PEDP; falta confirmar la polaridad del sensor |
-| Alimentación y carga | $V_{dc}$ = 24 V; R = 5 Ω, L = 30 mH; $m pprox 0{,}445$ para 1 A pico | PEDP | Confirmado |
-| Bootstrap | Precarga de 20 µs al liberar las compuertas; duty máximo por definir | Keylor – PEDP | Precarga implementada; duty máximo pendiente |
+| Alimentación y carga | $V_{dc}$ = 24 V; R = 5 Ω, L = 30 mH; $m \approx 0{,}445$ para 1 A pico | PEDP | Parámetros de diseño; no validados en el montaje energizado |
+| Bootstrap | Precarga de 20 µs al liberar las compuertas | Keylor – PEDP | Precarga implementada; el firmware integrado limita la modulación a ±0,85 |
 | Estado seguro | Las cuatro compuertas en 0 | Keylor – PEDP | Confirmado |
-| Formato de `duty_ref` | Q1.15 con signo, saturado a ±0,95 | PWM – firmware | Pendiente |
+| Formato de `duty_ref` | Q1.15 en el PWM original; milésimas en `rtl/pwm_pr/` | PWM – firmware | Cerrado para la adaptación final: el PR limita $m$ a ±0,85 y escribe ±850 |
 | Instante del trigger del ADC | Valle de la portadora, pulso de 4 ciclos | PWM – firmware | Acordado |
 | Señal de falla de la etapa de potencia | No hay señal automática de sobrecorriente; `fault_i` se conecta a 0. La etapa tiene un interruptor manual a GND, por confirmar sobre qué pin actúa | Keylor – PEDP | Pendiente |
+
+Para la carga propuesta, $R=5\ \Omega$, $L=30$ mH y $f=50$ Hz dan
+$|Z|=\sqrt{R^2+(2\pi fL)^2}\approx10{,}67\ \Omega$. Sin considerar caídas del
+puente, las tensiones pico necesarias para 0,2, 0,5 y 1,0 A son aproximadamente
+2,13 V, 5,33 V y 10,67 V. Con un bus de 24 V corresponden a índices ideales de
+modulación cercanos a 0,089, 0,222 y 0,445. Estos valores justifican que el
+límite digital de 0,85 deja margen de tensión, pero no sustituyen la medición de
+R, L, pérdidas, saturación de la inductancia ni la simulación PLECS.
 
 ---
 
@@ -1439,7 +1461,7 @@ La habilitación del lazo integrado requiere cerrar estos contratos. Las pruebas
 
 - **Arquitectura del sistema:** se seleccionó una arquitectura basada en MicroBlaze V para disponer de un procesador RISC-V integrado en la FPGA, capaz de ejecutar el controlador PR discreto y coordinar los periféricos mediante software embebido. Se estableció una frecuencia de operación de 100 MHz como base para el procesamiento y la temporización del sistema.
 
-  La utilización de una memoria local BRAM de 32 KiB permite almacenar el programa y sus datos dentro de la FPGA, mientras que las interfaces ILMB y DLMB proporcionan caminos de acceso diferenciados para instrucciones y datos. Se contempla una caché de instrucciones de 8 KiB, cuya configuración y compatibilidad con la organización de memoria deberán verificarse durante la implementación.
+  La implementación usa 128 KiB de BRAM local para almacenar el programa, sus datos y dos bancos de captura. Las interfaces ILMB y DLMB proporcionan caminos de acceso para instrucciones y datos, y se usa una caché de instrucciones de 8 KiB.
 
   La interconexión AXI permite integrar periféricos de Xilinx y módulos personalizados mediante interfaces estandarizadas. Esta organización facilita la incorporación de AXI Timer, AXI UART Lite, AXI GPIO, PWM Controller e interfaz ADC/XADC, manteniendo separadas las funciones de procesamiento, comunicación, temporización, adquisición y generación PWM.
 

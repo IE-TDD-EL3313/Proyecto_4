@@ -34,6 +34,13 @@ build/
 *.obj
 *.d
 *.map
+*.bak
+
+# Espacios de trabajo locales regenerables de Vitis. Las fuentes oficiales se
+# conservan en vitis/ y los scripts de carga en scripts/.
+vitis_workspace/
+vitis_workspace_pr/
+vitis_journal.py
 
 # Archivos temporales del sistema
 *~

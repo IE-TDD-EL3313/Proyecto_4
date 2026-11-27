@@ -10,7 +10,21 @@ Las evidencias se identifican por su alcance: simulación, implementación y med
 
 ## Resumen
 
-Se implementó en una Nexys 4 Rev. B una plataforma de control digital con MicroBlaze V a 100 MHz, PWM unipolar personalizado, adquisición XADC sincronizada, almacenamiento en BRAM y exportación por UART. En la PC se recibieron dos historiales de 2048 muestras RAW a 20 kHz, uno mediante envío automático y otro mediante el botón BTNC. Dos ejecuciones de la prueba AXI en placa verificaron los registros PWM, ambas saturaciones y la restauración de los valores iniciales tras un reset físico. Las formas de onda del PWM y la temporización del modelo XADC se evaluaron en simulación. Quedaron pendientes la validación analógica con entrada conocida y las mediciones del lazo integrado con Potencia.
+Se implementó en una Nexys 4 Rev. B una plataforma de control digital con MicroBlaze V a 100 MHz, PWM unipolar personalizado, adquisición XADC sincronizada, almacenamiento en BRAM y exportación por UART. En la PC se recibieron dos historiales de 2048 muestras RAW a 20 kHz, uno mediante envío automático y otro mediante el botón BTNC. Dos ejecuciones de la prueba AXI en placa verificaron los registros PWM, ambas saturaciones y la restauración de los valores iniciales tras un reset físico. La ecuación discreta del PR pasó una prueba numérica de 1000 muestras en el MicroBlaze V y un diagnóstico continuo registró 300000 muestras XADC sin pérdidas. Finalmente se documentaron dos señales PWM complementarias a 10,00 kHz y aproximadamente 3,4 V con osciloscopio, con los drivers y la etapa de potencia desconectados. No se completaron la calibración analógica del sensor ni la validación del lazo cerrado energizado; esos resultados se presentan como limitaciones y no como funcionamiento demostrado.
+
+### Guía de lectura
+
+El informe conserva el desarrollo por subsistema y termina con los resultados
+en placa. Para revisar la entrega en el orden del enunciado se recomienda:
+
+1. arquitectura e interfaces del sistema;
+2. periférico PWM, registros y diagramas de estado;
+3. adquisición, firmware y comunicación;
+4. resultados de simulación y FPGA;
+5. análisis crítico, conclusiones y trabajo pendiente.
+
+Cada resultado indica si proviene de simulación, ejecución en FPGA o medición
+con osciloscopio. Los ensayos no realizados se identifican como pendientes.
 
 ## Arquitectura e integración del sistema embebido
 
@@ -24,8 +38,8 @@ La Nexys 4 integra el procesador MicroBlaze V a 100 MHz, memoria local accesible
 | UARTLite | `0x40600000` | Transferencia a la PC a 115200 baudios, 8N1 |
 | AXI INTC | `0x41200000` | Despacho de interrupciones |
 | AXI Timer | `0x41C00000` | Base temporal de control |
-| XADC | `0x44A00000` | Configuración, estado y muestra adquirida |
-| PWM | `0x44A10000` | Modulación, control, tiempo muerto y sincronización |
+| PWM | `0x44A00000` | Modulación, control, tiempo muerto y sincronización en la adaptación final |
+| XADC Wizard | `0x44A10000` | Configuración y lectura de VAUX3 en la adaptación final |
 
 La interfaz con Procesamiento Electrónico de Potencia comprende las cuatro señales digitales del puente H, la entrada de falla y la señal acondicionada de corriente en VAUX3. El PWM unipolar conmuta las dos piernas de forma complementaria con un intervalo de bloqueo por transición. La tensión diferencial del puente excita la carga RL y la corriente medida cierra el lazo PR. A la fecha de entrega, el equipo de Potencia se encontraba finalizando su etapa. Las pruebas en placa de este informe corresponden al subsistema digital, con el PR inactivo en las capturas RAW.
 
@@ -36,8 +50,9 @@ flowchart LR
     TIMER -->|"Sincroniza la portadora"| PWM
     PWM -->|"Disparo de conversión"| ADC["XADC VAUX3"]
     ADC -->|"Muestra y estado"| CPU
-    CPU -->|"Historial"| BRAM["BRAM local"]
-    BRAM -->|"Banco congelado"| UART["UARTLite"]
+    CPU -->|"Escribe muestras"| BRAM["BRAM local"]
+    BRAM -->|"Lee banco congelado"| CPU
+    CPU -->|"Transmite historial"| UART["UARTLite"]
     BTNC["BTNC"] -->|"Solicitud por GPIO"| CPU
     UART -->|"Trama serie"| PC["PC"]
 ```
@@ -54,7 +69,7 @@ El mapa reserva `0x00000000–0x0001FFFF` para 128 KiB de memoria local comparti
 
 [Mapa de direcciones y rutas verificadas](../../resultados/axi/verificacion_issue_13.md) · [Constructor del sistema integrado](../../scripts/build_nexys4.tcl)
 
-Las secciones de PWM y firmware que siguen conservan el texto original del equipo. El apartado final de resultados incorpora las pruebas en placa realizadas después de redactar esas secciones y actualiza el estado experimental al cierre.
+
 
 ## Periférico PWM personalizado
 
@@ -349,7 +364,7 @@ El enunciado pide comprobar las compuertas y el tiempo muerto con la etapa de po
 | Arranque con `gates_en` = 1 | Primero ambos inferiores durante ~20 µs, luego conmutación |
 | `fault_i` o `gates_en` = 0 | Las 4 compuertas en 0 de inmediato |
 
-*(Completar con las capturas del osciloscopio y los valores medidos.)*
+**Estado de verificación:** Después de las pruebas AXI se cargó un bitstream de diagnóstico y se documentaron dos salidas complementarias con osciloscopio a 10 kHz, con la etapa de potencia desconectada. Esta evidencia confirma la frecuencia, el nivel lógico y la complementariedad visible de la pareja medida. La medición cuantitativa de tiempo muerto y la comprobación fotográfica de la segunda pareja permanecen pendientes; también falta medir la sincronización entre `pwm_trigger_o` y la publicación XADC.
 
 ### Análisis crítico
 
@@ -434,7 +449,7 @@ El motor de adquisición recorre IDLE, PULSE, WAIT_EOC, ISSUE_READ, WAIT_DRP y P
 
 El periférico no mantiene una cola de solicitudes. Un disparo recibido mientras no puede comenzar otra conversión activa `OVERRUN`. Si vence el watchdog, entra en ERROR y descarta respuestas tardías. Borrar el indicador de timeout no recupera el motor: se requiere reset coordinado y una nueva espera de `READY`.
 
-El wrapper ADC ocupa la base `0x44A00000`. El Wizard está detrás de esa interfaz; el firmware utiliza el mapa del wrapper y no el mapa de un Wizard AXI continuo.
+En la plataforma original usada para las capturas RAW, el wrapper ADC ocupa la base `0x44A00000`; el firmware utiliza el mapa del wrapper y no el mapa de un Wizard AXI continuo. En la adaptación final a Nexys 4 se asignó `0x44A00000` al PWM y `0x44A10000` al XADC Wizard. Las direcciones se presentan por plataforma para evitar reutilizar un ejecutable con un XSA incompatible.
 
 | Offset | Registro | Acceso | Semántica principal |
 |---|---|---|---|
@@ -590,7 +605,7 @@ Las pruebas propias verificaron la coherencia de los registros, las conversiones
 
 La sección posterior «Resultados de integración y verificación en placa» documenta las pruebas AXI y las capturas RAW realizadas en la Nexys 4. La siguiente tabla distingue las verificaciones físicas ya incorporadas de las mediciones que permanecen pendientes. Los resultados de simulación conservan su alcance original.
 
-| Comprobación física | Evidencia por incorporar |
+| Comprobación física | Resultado obtenido o verificación pendiente |
 |---|---|
 | Lectura de conversiones desde MicroBlaze V | Verificada en placa a 20 kHz con dos capturas RAW completas de 2048 muestras; faltan las pruebas físicas a 10 y 15 kHz |
 | Respuesta a una entrada analógica conocida | Voltaje medido, condiciones de conexión y códigos mínimo, máximo y promedio |
@@ -604,15 +619,154 @@ Las mediciones deberán identificar la placa, el BIT/XSA/ELF utilizado, la seña
 
 La implementación permite controlar cuándo se solicita una conversión, asociar dato y tiempo, detectar discontinuidades y exportar un historial mientras continúa la adquisición. Las pruebas confirmaron esos mecanismos en los modelos utilizados y la construcción de aplicaciones que caben en memoria accesible por el procesador. La separación entre ISR y transmisión evita que el envío de una trama de más de dos segundos forme parte del trabajo periódico de muestreo.
 
-La revisión de memoria mostró que un ELF enlazado no basta para demostrar integración: el procesador debe disponer de una ruta de datos hacia la región donde se ubican sus variables. La ampliación de LMB y la auditoría contra el XSA resuelven ese requisito en la versión entregada, aunque todavía corresponde comprobar el arranque real.
+La revisión de memoria mostró que un ELF enlazado no basta para demostrar integración: el procesador debe disponer de una ruta de datos hacia la región donde se ubican sus variables. La ampliación de LMB y la auditoría contra el XSA resuelven ese requisito en la versión entregada. Posteriormente, las pruebas en la Nexys 4 confirmaron el arranque y la ejecución de las aplicaciones de diagnóstico utilizadas, sin extender esta validación al controlador PR en lazo cerrado.
 
-Las pruebas posteriores en la Nexys 4 confirmaron la ejecución de aplicaciones de diagnóstico, la adquisición de historiales RAW y su exportación por UART. Permanecen pendientes la calibración y polaridad del sensor, la caracterización analógica con una entrada conocida y las mediciones temporales del lazo completo. El ensayo analógico simulado también tuvo un tamaño reducido. La aplicación RAW permite avanzar sin inventar esos parámetros, pero no acredita el seguimiento de corriente, la respuesta del PR ni el funcionamiento energizado del inversor. Para evaluar el control completo también se requieren coeficientes aprobados, límites de modulación, protecciones y mediciones temporales reales.
+Las pruebas posteriores en la Nexys 4 confirmaron la ejecución de aplicaciones de diagnóstico, la adquisición de historiales RAW y su exportación por UART. Permanecen pendientes la calibración y polaridad del sensor, la caracterización analógica con una entrada conocida y las mediciones temporales del lazo completo. El ensayo analógico simulado también tuvo un tamaño reducido. La aplicación RAW permite avanzar sin inventar esos parámetros, pero no acredita el seguimiento de corriente, la respuesta del PR ni el funcionamiento energizado del inversor. Los coeficientes del PR y límites conservadores de modulación y protección sí quedaron incorporados y probados numéricamente; todavía requieren validación contra la planta real y mediciones temporales con el lazo activo.
 
 El trabajo digital entregó una cadena implementada desde el disparo de conversión hasta el almacenamiento y la recepción en PC, junto con el núcleo de procesamiento y su supervisor periódico. Se resolvieron las dependencias de sincronización, propiedad de memoria y ubicación del histórico, y se generaron productos de hardware y software compatibles para continuar la integración en placa.
 
 Los resultados obtenidos permiten evaluar por separado los mecanismos de adquisición, control y comunicación, y delimitan lo que debe contrastarse mediante mediciones físicas. La contribución experimental del sistema completará ese contraste y el análisis conjunto del inversor.
 
 ## Resultados de integración y verificación en placa
+
+### Adaptación final del control a la Nexys 4
+
+La integración final no reutiliza sin cambios el formato Q1.15 del periférico
+descrito en la primera parte del informe. Para reducir el riesgo de modificar
+un proyecto que ya funcionaba, se tomó como base el núcleo ubicado en
+`rtl/pwm_pr/`, cuya entrada `duty_ref` es un entero con signo expresado en
+milésimas de modulación. Por ejemplo, `500` representa $m=0,5$ y `-850`
+representa $m=-0,85$. El controlador PR conserva internamente el resultado en
+punto flotante y también calcula una representación Q1.15 para diagnóstico,
+pero la función de integración convierte explícitamente $m$ a `duty_mil` antes
+de escribir el registro del PWM. De esta forma no se mezclan los dos formatos.
+
+El regulador implementado es un PR no ideal para $f_s=5$ kHz y una referencia
+de 50 Hz. Se usaron los coeficientes entregados por el equipo de Potencia el 20
+de noviembre de 2026:
+
+$$
+y_r[k] = 1{,}98359834y_r[k-1] - 0{,}98752026y_r[k-2]
+       + 1{,}24797430(e[k]-e[k-2])
+$$
+
+$$
+u[k] = 20e[k] + y_r[k], \qquad -20{,}4\ \text{V} \le u[k] \le 20{,}4\ \text{V}
+$$
+
+Con $V_{dc}=24$ V, el índice queda limitado a $|m|\le0,85$. El firmware admite
+referencias de 0,2, 0,5 y 1,0 A pico, aunque el filtro y los límites de la
+aplicación integrada se dejaron configurados de manera conservadora para el
+primer ensayo de 0,2 A. Por eso no era correcto habilitar directamente los
+ensayos de mayor amplitud sin recalcular y validar protecciones con la planta.
+
+La prueba independiente del PR ejecutó 1000 pasos y comparó 12 puntos contra
+valores de referencia calculados en doble precisión. También comprobó el
+arranque en fase cero, las tres amplitudes válidas, el rechazo de amplitudes no
+permitidas y el borrado de estados al detener el regulador. El resultado fue
+PASS en todos los casos. Esta evidencia comprueba la implementación numérica,
+pero no sustituye la comparación con PLECS ni demuestra estabilidad en lazo
+cerrado.
+
+[Registro de la prueba numérica](../../resultados/control_pr/prueba_numerica_uart.txt) · [Implementación del PR](../../vitis/integracion_pr/d4_pr_p3.c) · [Prueba de referencia](../../vitis/integracion_pr/d4_pr_selftest.c)
+
+### Parámetros de potencia disponibles y alcance
+
+La interfaz se preparó para un bus de 24 V, un puente H con cuatro IRF540N y
+dos drivers IR2110, y una carga propuesta de $R=5\ \Omega$ y $L=30$ mH. A 50
+Hz, la magnitud ideal de la impedancia es
+
+$$
+|Z|=\sqrt{R^2+(2\pi fL)^2}\approx10{,}67\ \Omega.
+$$
+
+Sin incluir las caídas del puente, las referencias de 0,2, 0,5 y 1,0 A pico
+requieren aproximadamente 2,13 V, 5,33 V y 10,67 V pico. Para $V_{dc}=24$ V,
+los índices ideales son 0,089, 0,222 y 0,445. Todos quedan por debajo del límite
+de 0,85 aplicado en el firmware.
+
+Estos cálculos muestran margen de tensión nominal, pero no demuestran el
+dimensionamiento térmico ni el comportamiento dinámico real. No se recibieron
+en este cierre mediciones finales de R y L, archivos PLECS ni registros del
+inversor energizado. Por esa razón no se presentan pérdidas, rizado de corriente,
+error de fundamental ni comparación simulación-medición como resultados
+experimentales. Esos elementos siguen siendo responsabilidad de la integración
+con Procesamiento Electrónico de Potencia.
+
+### Diagnóstico continuo PWM-XADC
+
+Antes de ejecutar la aplicación de control se mantuvo el PWM interno a 10 kHz
+y se consultó el XADC desde una ISR de 5 kHz durante 60 segundos. Se registraron
+300000 interrupciones, 300000 consultas y 300000 muestras nuevas, sin lecturas
+ausentes, canales erróneos ni fallas. Al finalizar, el firmware deshabilitó el
+PWM y confirmó `enable=0` y `running=0`.
+
+| Métrica | Resultado |
+|---|---:|
+| Duración nominal | 60 s |
+| ISR ejecutadas | 300000 |
+| Consultas XADC | 300000 |
+| Muestras nuevas | 300000 |
+| Muestras ausentes | 0 |
+| Canal erróneo | 0 |
+| Fallas | 0 |
+
+Este ensayo confirma continuidad digital y coordinación temporal entre PWM,
+XADC e ISR. Como la entrada analógica no estaba calibrada como corriente, el
+conteo no demuestra exactitud, ganancia ni offset del sensor.
+
+[Transcripción del diagnóstico de 60 segundos](../../resultados/pwm_xadc/diagnostico_60s_uart.txt)
+
+### Prueba del arranque integrado y actuación de las protecciones
+
+La aplicación integrada se ejecutó con dos bloqueos independientes: las
+banderas `D4_CONTROL_PERMITIR_PWM` y `D4_BANCO_PUENTE_VALIDADO` se mantuvieron
+en cero, y el módulo `pwm_output_guard.sv` forzó las cuatro salidas físicas a
+cero. Con esa configuración se validaron la prueba numérica del PR, el AXI
+Timer y el comportamiento del autocero sin riesgo de accionar el puente.
+
+El período observado por el contador libre estuvo entre 19990 y 20010 ciclos,
+alrededor del objetivo de 20000 ciclos a 100 MHz. El autocero rechazó la primera
+muestra porque VAUX3 estaba cerca de 93 códigos, aproximadamente 23 mV, fuera
+del intervalo permitido de 1650 a 2000 códigos. La aplicación pasó al estado
+`D4_CERO_FALLO_CODIGO`, detuvo el PWM interno y no autorizó el cálculo con
+actuación. Este fue el comportamiento seguro previsto para una señal de sensor
+ausente o sin acondicionamiento correcto.
+
+El fallo no se ocultó ampliando artificialmente los límites del ADC: hacerlo
+habría permitido interpretar una entrada flotante como corriente cero. Para
+continuar era necesario conectar y caracterizar el acondicionamiento del sensor
+en XA1_P/XA1_N, pero esa actividad quedó fuera del tiempo disponible.
+
+[Registro del ensayo integrado seguro](../../resultados/control_pr/integracion_segura_uart.txt) · [Guardia física de salidas](../../rtl/integracion_pr/pwm_output_guard.sv)
+
+### Evidencia física de las salidas PWM
+
+Se generó un bitstream de diagnóstico separado que expone las cuatro señales
+del núcleo funcional en JA1, JA2, JA3 y JA4. La Nexys 4 se programó desde XSDB
+y las señales se observaron con osciloscopio a 10 kHz, con un tiempo muerto
+programado de 100 ciclos (1 us a 100 MHz). Los drivers, la fuente del bus DC y
+el puente H permanecieron desconectados. Esta condición satisface el paso de
+seguridad solicitado antes de cualquier ensayo energizado.
+
+El instrumento indicó 10,00 kHz en ambos canales. En las dos tomas, CH1 alcanzó
+3,44 V y CH2 estuvo entre 3,36 y 3,40 V. Se utilizó una escala horizontal de
+50 us/div y una escala vertical de 1 V/div. Las señales son complementarias a
+la resolución de la fotografía.
+
+![Señales PWM complementarias medidas en la Nexys 4](../../resultados/pwm/fotos_osciloscopio/pwm_complementarias.jpg)
+
+*Figura 10. Dos señales complementarias del conector JA. El osciloscopio indica 10,00 kHz en ambos canales, 3,44 V máximo en CH1 y 3,36 V máximo en CH2. Escalas: 50 us/div y 1 V/div.*
+
+![Segunda toma de las señales PWM](../../resultados/pwm/fotos_osciloscopio/pwm_dos_salidas.jpg)
+
+*Figura 11. Segunda toma del mismo ensayo: 10,00 kHz en ambos canales, 3,44 V máximo en CH1 y 3,40 V máximo en CH2. La etapa de potencia permaneció desconectada.*
+
+Las fotografías no incluyen cursores con resolución suficiente para medir el
+tiempo muerto de 1 us. Por eso ese valor se identifica como configuración del
+PWM y resultado de simulación temporizada, no como una medición física.
+
+[Condiciones y ubicación de las fotografías](../../resultados/pwm/fotos_osciloscopio/README.md) · [Script de carga por terminal](../../scripts/run_pwm_xadc_cli.tcl)
 
 ### Verificación AXI en la Nexys 4
 
@@ -635,7 +789,7 @@ La verificación inicial de placa mostró que la orden positiva `0x7FFF` quedaba
 
 Se declaró el parámetro como `int` en la interfaz del PWM y se hizo explícita la conversión a 16 bits al conectarlo al banco de registros. El wrapper corregido generó `.DUTY_MAX(31129)`. En Q1.15, el límite observado pasó de aproximadamente 0,3924 a 0,9500. Se reportaron 85/85 comprobaciones RTL y 86/86 con el wrapper corregido, además de las dos corridas UART que confirmaron el comportamiento en placa. Las 25 pruebas temporizadas del PWM aislado corresponden a la campaña previa identificada arriba.
 
-El ensayo de placa verifica las transacciones AXI y el estado de los registros. Quedan pendientes las mediciones de frecuencia y tiempo muerto en las salidas PWM y la correlación temporal entre el disparo PWM y la publicación XADC en la FPGA. Se preparó una instrumentación ILA, pero la corrida de Vivado terminó en `create_debug_core` con el error `[Vivado 12-29205]`, antes de generar un bitstream instrumentado. Un monitor digital con contadores y salida UART queda como alternativa para esa verificación.
+El ensayo AXI verifica las transacciones y el estado de los registros. Después se documentó físicamente una pareja de salidas PWM complementarias con osciloscopio, usando el bitstream de diagnóstico a 10 kHz y sin conectar la etapa de potencia. Las imágenes aportan evidencia funcional de esa pareja; quedó pendiente una fotografía de la segunda pareja, la medición cuantitativa del tiempo muerto y la correlación física entre el disparo PWM y la publicación XADC. Se intentó preparar una instrumentación ILA, pero Vivado terminó en `create_debug_core` con el error `[Vivado 12-29205]`, antes de generar un bitstream instrumentado.
 
 ### Adquisición y transmisión verificadas en la Nexys 4
 
@@ -682,18 +836,21 @@ La siguiente matriz relaciona los requisitos principales del Proyecto 4 de EL331
 |---|---|---|
 | Sistema embebido MicroBlaze V | Arquitectura a 100 MHz, BRAM, interfaces AXI y aplicaciones ejecutadas en FPGA | Verificado parcialmente en placa |
 | Periférico PWM personalizado AXI4-Lite | Testbench de autochequeo, simulación temporizada y pruebas de registros AXI | Verificado en simulación y parcialmente en placa |
-| PWM unipolar y tiempo muerto | Formas de onda y comprobaciones del periférico mediante simulación | Verificado en simulación; pendiente medición física |
+| PWM unipolar y tiempo muerto | Simulación temporizada y fotografías de una pareja complementaria con la etapa desenergizada | Pareja medida a 10,00 kHz y ~3,4 V; segunda pareja y tiempo muerto cuantitativo pendientes |
 | Saturación de referencia PWM | Pruebas AXI de saturación positiva y negativa en la Nexys 4 | Verificado en placa |
 | Sincronización PWM–XADC | Pruebas digitales y simulaciones del subsistema | Verificado en simulación; pendiente correlación temporal física |
 | Adquisición mediante XADC | Dos capturas RAW completas de 2048 muestras a 20 kHz | Verificado digitalmente en placa; pendiente calibración analógica |
 | Almacenamiento de muestras | Historiales completos recuperados desde el sistema embebido | Verificado en placa |
 | Exportación mediante UART | Transferencias automáticas y mediante BTNC recibidas en la PC | Verificado en placa |
-| Firmware de control | Implementación y pruebas de software; aplicaciones de diagnóstico ejecutadas en FPGA | Verificado parcialmente; PR integrado pendiente |
-| Temporización del sistema | Análisis de timing de implementación e instrumentación parcial del firmware | Verificado parcialmente; pendiente medición completa de jitter y WCET |
+| Firmware de control | PR discreto, autocero, protecciones y prueba numérica de 1000 pasos ejecutada en MicroBlaze V | Implementado y validado numéricamente; actuación integrada no habilitada |
+| Temporización del sistema | Timing estático cerrado, diagnóstico de 300000 ISR y período observado de 19990–20010 ciclos | Verificado parcialmente; pendiente WCET y jitter con lazo energizado |
 | Integración con inversor monofásico | Interfaces digitales y preparación para conexión con la etapa de potencia | Pendiente validación conjunta |
 | Seguimiento de corriente mediante PR | Arquitectura de control preparada para integrar los parámetros definitivos | Pendiente validación experimental |
 
 Los estados anteriores se refieren exclusivamente a las evidencias documentadas. La ejecución de aplicaciones de diagnóstico no equivale a demostrar el funcionamiento del controlador PR en lazo cerrado. Asimismo, la recepción de muestras RAW con VAUX3 desconectado verifica la cadena digital de adquisición y exportación, pero no constituye una medición calibrada de corriente.
+
+La [matriz de cierre](matriz_cierre.md) amplía esta tabla con los entregables
+pendientes y los archivos que todavía debe aportar el equipo.
 
 ---
 
@@ -701,9 +858,10 @@ Los estados anteriores se refieren exclusivamente a las evidencias documentadas.
 
 1. La plataforma digital se implementó para 100 MHz y se validó el acceso integrado a los registros PWM desde MicroBlaze V. La comparación entre simulación y banco permitió rastrear una diferencia de saturación hasta el tipo del parámetro en el wrapper. La corrección quedó confirmada mediante dos ejecuciones exitosas de la prueba AXI en placa, con un reset físico entre ambas.
 2. Se verificaron en placa la adquisición RAW a 20 kHz, el almacenamiento de 2048 muestras consecutivas y su recepción por UART, tanto en el envío automático como mediante BTNC. La ampliación de BRAM conserva el historial completo y la separación entre ISR y transmisión evita esperar por la UART dentro del servicio periódico.
-3. La verificación temporizada de la netlist del PWM respalda la generación de las formas de onda previstas. Falta medir en placa el tiempo muerto, la frecuencia y la relación temporal entre el disparo y la publicación del XADC. También queda pendiente aplicar una entrada conocida a VAUX3 para comprobar su respuesta analógica.
-4. El equipo de Potencia se encontraba finalizando su etapa al cierre de este informe. Quedan pendientes la incorporación de los coeficientes aprobados, la validación experimental del seguimiento de corriente con el PR activo y la medición del tiempo de ejecución y del jitter del lazo durante la exportación.
+3. La verificación temporizada de la netlist y la medición física de una pareja complementaria respaldan la generación PWM a 10,00 kHz y nivel lógico cercano a 3,4 V. Quedaron pendientes la fotografía de la segunda pareja, la medición física del tiempo muerto de 1 us, la relación temporal entre el disparo PWM y la publicación XADC y una entrada conocida en VAUX3.
+4. Los coeficientes del PR quedaron incorporados y su ecuación pasó una prueba de 1000 pasos en MicroBlaze V. El arranque integrado llegó hasta el autocero, donde rechazó correctamente una entrada de aproximadamente 93 códigos que no correspondía al rango esperado del sensor. No se habilitó la actuación ni se validó el seguimiento de corriente, por lo que no se reportan resultados de 0,2, 0,5 o 1,0 A como si hubieran sido medidos.
 5. El proceso de integración evidenció la importancia de combinar verificaciones funcionales, simulaciones temporizadas y pruebas físicas. Aunque los testbenches permitieron comprobar el comportamiento del PWM y los módulos de adquisición, las pruebas AXI en la Nexys 4 revelaron una discrepancia en la saturación que fue necesario rastrear hasta la parametrización del wrapper. Esta experiencia confirmó que la verificación aislada de un periférico no sustituye su validación dentro del sistema embebido completo y que las evidencias deben distinguir claramente entre simulación, implementación y ejecución real.
+6. Por motivos de tiempo se decidió cerrar la implementación sin energizar el puente H. Esta decisión reduce el alcance experimental, pero conserva la seguridad y evita afirmar un control en lazo cerrado que no fue demostrado. El siguiente paso técnico sería acondicionar y calibrar el sensor en VAUX3, repetir el autocero, medir las protecciones con la etapa desenergizada y solo después autorizar una prueba de baja energía con límite de corriente externo.
 
 ---
 

@@ -1,0 +1,23 @@
+CONTROLADOR PR CON CORRIENTE REAL - ENSAYO SEGURO
+================================================
+
+Configuración:
+- Timer: 5 kHz (200 us).
+- Referencia preparada: 0.2 A pico a 50 Hz.
+- Actuación del puente bloqueada en software y en RTL.
+- Entrada: VAUX3 de la Nexys 4.
+
+Resultados observados:
+- D4 PR SELFTEST: PASS (1000 muestras, 12 puntos).
+- Periodo de interrupción: 19990 a 20010 ciclos de reloj.
+- CERO AUTO: estado=2 (código fuera del intervalo permitido).
+- Código de diagnóstico previo: aproximadamente 93 códigos (23 mV).
+- Intervalo de cero esperado por el firmware: 1650 a 2000 códigos.
+- El firmware detuvo el PWM interno antes de autorizar el PR.
+- No se escribió ninguna orden de actuación a las compuertas.
+
+Interpretación:
+La aplicación integrada alcanzó el arranque, la prueba numérica del PR y la
+base temporal. El autocero rechazó la entrada porque VAUX3 no recibió la señal
+acondicionada esperada del sensor. Este resultado verifica el mecanismo de
+interbloqueo, pero no valida el control de corriente ni la etapa de potencia.
